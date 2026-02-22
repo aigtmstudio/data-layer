@@ -42,7 +42,7 @@ export abstract class BaseProvider implements Partial<DataProvider> {
   protected async request<T>(
     method: 'get' | 'post' | 'put' | 'delete',
     path: string,
-    options?: { body?: unknown; params?: Record<string, string> },
+    options?: { body?: unknown; params?: Record<string, string>; timeout?: number },
   ): Promise<T> {
     await this.acquireSlot();
 
@@ -50,6 +50,7 @@ export abstract class BaseProvider implements Partial<DataProvider> {
       headers: this.getAuthHeaders(),
       body: options?.body,
       params: options?.params,
+      timeout: options?.timeout,
     });
   }
 

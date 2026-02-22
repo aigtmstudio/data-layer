@@ -84,4 +84,17 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 900,
     apiBaseUrl: 'https://api.tavily.com',
   },
+  {
+    name: 'apify',
+    displayName: 'Apify',
+    type: 'scraping',
+    priority: 6,
+    capabilities: ['company_enrich', 'people_enrich'],
+    costPerOperation: {
+      company_enrich: { baseCostCredits: 1, description: '~$0.01 per LinkedIn company scrape' },
+      people_enrich: { baseCostCredits: 1, description: '~$0.01 per LinkedIn profile scrape' },
+    },
+    rateLimitPerMinute: 300,
+    apiBaseUrl: 'https://api.apify.com/v2',
+  },
 ];

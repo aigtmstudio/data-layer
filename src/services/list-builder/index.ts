@@ -1,7 +1,7 @@
 import { getDb, schema } from '../../db/index.js';
 import { eq, and, or, gte, lte, inArray, ilike, sql, isNull } from 'drizzle-orm';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
-import type { IcpFilters } from '../../db/schema/icps.js';
+import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
 import type { UnifiedCompany } from '../../providers/types.js';
 import { NotFoundError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
@@ -23,6 +23,7 @@ export class ListBuilder {
     if (!icp) throw new NotFoundError('ICP', params.icpId);
 
     const filters = icp.filters as IcpFilters;
+    const providerHints = (icp.providerHints as ProviderSearchHints | null) ?? filters.providerHints;
 
     // Build company query
     const conditions = [eq(schema.companies.clientId, params.clientId)];
@@ -40,6 +41,17 @@ export class ListBuilder {
     }
     if (filters.countries?.length) {
       conditions.push(inArray(schema.companies.country, filters.countries));
+    }
+    // Use provider hints keyword terms for additional matching
+    if (providerHints?.keywordSearchTerms?.length) {
+      conditions.push(
+        or(...providerHints.keywordSearchTerms.map(term =>
+          or(
+            ilike(schema.companies.name, `%${term}%`),
+            ilike(schema.companies.industry, `%${term}%`),
+          )!,
+        ))!,
+      );
     }
 
     const matchingCompanies = await db

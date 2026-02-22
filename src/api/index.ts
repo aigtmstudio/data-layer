@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import multipart from '@fastify/multipart';
 import { authPlugin } from './plugins/auth.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { clientRoutes } from './routes/clients.js';
@@ -20,13 +21,14 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
 
   // Plugins
   await app.register(cors, { origin: true });
+  await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
   await app.register(authPlugin, { apiKey });
   await app.register(errorHandlerPlugin);
 
   // Routes
   await app.register(clientRoutes, { prefix: '/api/clients' });
   await app.register(icpRoutes, { prefix: '/api/clients', container });
-  await app.register(personaRoutes, { prefix: '/api/clients' });
+  await app.register(personaRoutes, { prefix: '/api/clients', container });
   await app.register(listRoutes, { prefix: '/api/lists', container });
   await app.register(enrichmentRoutes, { prefix: '/api/enrichment', container });
   await app.register(creditRoutes, { prefix: '/api/credits', container });

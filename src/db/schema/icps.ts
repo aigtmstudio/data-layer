@@ -22,6 +22,21 @@ export interface IcpFilters {
   keywords?: string[];
   excludeCompanyIds?: string[];
   excludeDomains?: string[];
+  providerHints?: ProviderSearchHints;
+}
+
+export interface ProviderSearchHints {
+  semanticSearchQuery?: string;
+  keywordSearchTerms?: string[];
+  industryNaicsMapping?: string[];
+  naturalLanguageDescription?: string;
+}
+
+export interface IcpSourceRecord {
+  sourceType: 'document' | 'transcript' | 'classic' | 'crm_csv';
+  fileName?: string;
+  addedAt: string;
+  contribution: string[];
 }
 
 export const icps = pgTable('icps', {
@@ -33,6 +48,10 @@ export const icps = pgTable('icps', {
 
   naturalLanguageInput: text('natural_language_input'),
   filters: jsonb('filters').$type<IcpFilters>().notNull().default({}),
+
+  sources: jsonb('sources').$type<IcpSourceRecord[]>().default([]),
+  providerHints: jsonb('provider_hints').$type<ProviderSearchHints>(),
+  suggestedPersonaId: uuid('suggested_persona_id'),
 
   aiParsingConfidence: numeric('ai_parsing_confidence', { precision: 3, scale: 2 }),
   lastParsedAt: timestamp('last_parsed_at', { withTimezone: true }),

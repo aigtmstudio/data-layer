@@ -10,6 +10,7 @@ import { listTypeEnum } from './enums.js';
 export interface ListFilterSnapshot {
   icpFilters: Record<string, unknown>;
   personaFilters?: Record<string, unknown>;
+  providerHints?: Record<string, unknown>;
   strategy?: Record<string, unknown>;
   appliedAt: string;
 }

@@ -1,6 +1,6 @@
 import { getDb, schema } from '../../db/index.js';
 import { eq, and, or, gte, lte, inArray, ilike, isNull } from 'drizzle-orm';
-import type { IcpFilters } from '../../db/schema/icps.js';
+import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
 import type { SourceRecord } from '../../db/schema/companies.js';
 import type { StrategyData } from '../../db/schema/intelligence.js';
 import type { UnifiedCompany } from '../../providers/types.js';
@@ -54,6 +54,7 @@ export class DynamicOrchestrator {
     const [icp] = await db.select().from(schema.icps).where(eq(schema.icps.id, params.icpId));
     if (!icp) throw new NotFoundError('ICP', params.icpId);
     const filters = icp.filters as IcpFilters;
+    const providerHints = (icp.providerHints as ProviderSearchHints | null) ?? filters.providerHints;
 
     // 2. Generate strategy
     log.info('Generating intelligence strategy');
@@ -95,6 +96,17 @@ export class DynamicOrchestrator {
     if (filters.countries?.length) {
       conditions.push(inArray(schema.companies.country, filters.countries));
     }
+    // Use provider hints keyword terms for additional matching
+    if (providerHints?.keywordSearchTerms?.length) {
+      conditions.push(
+        or(...providerHints.keywordSearchTerms.map(term =>
+          or(
+            ilike(schema.companies.name, `%${term}%`),
+            ilike(schema.companies.industry, `%${term}%`),
+          )!,
+        ))!,
+      );
+    }
 
     const matchingCompanies = await db
       .select()
@@ -102,7 +114,7 @@ export class DynamicOrchestrator {
       .where(and(...conditions))
       .limit(params.limit ?? 1000);
 
-    log.info({ count: matchingCompanies.length }, 'Companies matching ICP filters');
+    log.info({ count: matchingCompanies.length, hasProviderHints: !!providerHints }, 'Companies matching ICP filters');
 
     // 5. Get client profile for signal context
     const clientProfile = await this.clientProfileService.getProfile(params.clientId);
@@ -272,6 +284,7 @@ export class DynamicOrchestrator {
         memberCount: scored.length + contactsAdded,
         filterSnapshot: {
           icpFilters: filters as unknown as Record<string, unknown>,
+          providerHints: providerHints as unknown as Record<string, unknown>,
           strategy: { reasoning: strategy.reasoning, providerPlan: strategy.providerPlan } as unknown as Record<string, unknown>,
           appliedAt: new Date().toISOString(),
         },

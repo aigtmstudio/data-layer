@@ -8,6 +8,8 @@ import { EnrichmentPipeline } from './services/enrichment/index.js';
 import { ListBuilder } from './services/list-builder/index.js';
 import { ExportEngine } from './services/export/index.js';
 import { IcpParser } from './services/icp-engine/parser.js';
+import { SourceProcessor } from './services/icp-engine/source-processor.js';
+import { DocumentExtractor } from './lib/document-extractor.js';
 import {
   ProviderPerformanceTracker,
   ClientProfileService,
@@ -38,6 +40,7 @@ export interface ServiceContainer {
   listBuilder: ListBuilder;
   exportEngine: ExportEngine;
   icpParser: IcpParser;
+  sourceProcessor: SourceProcessor;
   scheduler: Scheduler;
   // Intelligence layer
   performanceTracker: ProviderPerformanceTracker;
@@ -83,6 +86,8 @@ async function main() {
   const listBuilder = new ListBuilder();
   const exportEngine = new ExportEngine();
   const icpParser = new IcpParser(config.anthropicApiKey);
+  const documentExtractor = new DocumentExtractor();
+  const sourceProcessor = new SourceProcessor(documentExtractor);
   const scheduler = new Scheduler(config.databaseUrl);
 
   // Intelligence layer
@@ -105,6 +110,7 @@ async function main() {
     listBuilder,
     exportEngine,
     icpParser,
+    sourceProcessor,
     scheduler,
     performanceTracker,
     clientProfileService,

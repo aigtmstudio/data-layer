@@ -18,6 +18,8 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
     "@fastify/cors": "^11.0.0",
+    "@fastify/multipart": "^9.4.0",
+    "csv-parse": "^6.1.0",
     "dayjs": "^1.11.13",
     "drizzle-orm": "^0.38.4",
     "drizzle-zod": "^0.7.0",
@@ -27,7 +29,9 @@
     "fastify-type-provider-zod": "^4.0.2",
     "googleapis": "^144.0.0",
     "ky": "^1.7.4",
+    "mammoth": "^1.11.0",
     "nanoid": "^5.0.9",
+    "pdf-parse": "^2.4.5",
     "pg-boss": "^10.1.5",
     "pino": "^9.6.0",
     "playwright-core": "^1.58.2",
@@ -36,6 +40,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/pdf-parse": "^1.1.5",
     "drizzle-kit": "^0.30.4",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3",

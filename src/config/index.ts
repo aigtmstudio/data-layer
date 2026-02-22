@@ -12,6 +12,7 @@ const envSchema = z.object({
   PROSPEO_API_KEY: z.string().min(1),
 
   EXA_API_KEY: z.string().optional(),
+  TAVILY_API_KEY: z.string().optional(),
 
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
@@ -36,6 +37,7 @@ export const config = {
   leadmagicApiKey: parsed.data.LEADMAGIC_API_KEY,
   prospeoApiKey: parsed.data.PROSPEO_API_KEY,
   exaApiKey: parsed.data.EXA_API_KEY,
+  tavilyApiKey: parsed.data.TAVILY_API_KEY,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

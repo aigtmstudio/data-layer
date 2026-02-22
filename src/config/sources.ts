@@ -71,4 +71,17 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 600,
     apiBaseUrl: 'https://api.exa.ai',
   },
+  {
+    name: 'tavily',
+    displayName: 'Tavily',
+    type: 'search',
+    priority: 5,
+    capabilities: ['company_search', 'company_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 1, description: '1 credit per basic search' },
+      company_enrich: { baseCostCredits: 3, description: '2cr advanced search + 1cr extract' },
+    },
+    rateLimitPerMinute: 900,
+    apiBaseUrl: 'https://api.tavily.com',
+  },
 ];

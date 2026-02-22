@@ -1,0 +1,61 @@
+import type { CostConfig } from '../db/schema/data-sources.js';
+
+export interface DefaultSourceConfig {
+  name: string;
+  displayName: string;
+  type: 'search' | 'enrichment' | 'email_finding' | 'email_verification' | 'scraping';
+  priority: number;
+  capabilities: string[];
+  costPerOperation: CostConfig;
+  rateLimitPerMinute?: number;
+  rateLimitPerDay?: number;
+  apiBaseUrl: string;
+}
+
+export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
+  {
+    name: 'apollo',
+    displayName: 'Apollo.io',
+    type: 'enrichment',
+    priority: 1,
+    capabilities: ['company_search', 'company_enrich', 'people_search', 'people_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 0, description: 'Free search' },
+      company_enrich: { baseCostCredits: 1, description: '1 credit per company' },
+      people_search: { baseCostCredits: 0, description: 'Free search' },
+      people_enrich: { baseCostCredits: 1, description: '1 credit per person' },
+    },
+    rateLimitPerMinute: 100,
+    rateLimitPerDay: 10000,
+    apiBaseUrl: 'https://api.apollo.io/api/v1',
+  },
+  {
+    name: 'leadmagic',
+    displayName: 'LeadMagic',
+    type: 'enrichment',
+    priority: 2,
+    capabilities: ['company_enrich', 'people_enrich', 'email_find'],
+    costPerOperation: {
+      company_enrich: { baseCostCredits: 1, description: '1 credit per company' },
+      people_enrich: { baseCostCredits: 1, description: '1 credit per profile' },
+      email_find: { baseCostCredits: 1, description: '1 credit per email find' },
+    },
+    rateLimitPerMinute: 60,
+    apiBaseUrl: 'https://api.leadmagic.io/v1',
+  },
+  {
+    name: 'prospeo',
+    displayName: 'Prospeo',
+    type: 'email_finding',
+    priority: 3,
+    capabilities: ['email_find', 'email_verify', 'people_enrich', 'people_search'],
+    costPerOperation: {
+      email_find: { baseCostCredits: 1, description: '1 credit per email find' },
+      email_verify: { baseCostCredits: 0.05, description: '20 verifications per credit' },
+      people_enrich: { baseCostCredits: 1, description: '1 credit per enrichment' },
+      people_search: { baseCostCredits: 0.1, description: '10 searches per credit' },
+    },
+    rateLimitPerMinute: 60,
+    apiBaseUrl: 'https://api.prospeo.io',
+  },
+];

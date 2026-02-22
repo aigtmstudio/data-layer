@@ -19,6 +19,9 @@ const envSchema = z.object({
   DIFFBOT_API_KEY: z.string().optional(),
   BROWSERBASE_API_KEY: z.string().optional(),
   BROWSERBASE_PROJECT_ID: z.string().optional(),
+  AGENTQL_API_KEY: z.string().optional(),
+  FIRECRAWL_API_KEY: z.string().optional(),
+  SCRAPEGRAPH_API_KEY: z.string().optional(),
 
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
@@ -50,6 +53,9 @@ export const config = {
   diffbotApiKey: parsed.data.DIFFBOT_API_KEY,
   browserbaseApiKey: parsed.data.BROWSERBASE_API_KEY,
   browserbaseProjectId: parsed.data.BROWSERBASE_PROJECT_ID,
+  agentqlApiKey: parsed.data.AGENTQL_API_KEY,
+  firecrawlApiKey: parsed.data.FIRECRAWL_API_KEY,
+  scrapegraphApiKey: parsed.data.SCRAPEGRAPH_API_KEY,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

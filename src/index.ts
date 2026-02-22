@@ -18,6 +18,9 @@ import { ParallelProvider } from './providers/parallel/index.js';
 import { ValyuProvider } from './providers/valyu/index.js';
 import { DiffbotProvider } from './providers/diffbot/index.js';
 import { BrowserbaseProvider } from './providers/browserbase/index.js';
+import { AgentQlProvider } from './providers/agentql/index.js';
+import { FirecrawlProvider } from './providers/firecrawl/index.js';
+import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -57,6 +60,9 @@ async function main() {
   if (config.valyuApiKey) orchestrator.registerProvider(new ValyuProvider(config.valyuApiKey), 8);
   if (config.diffbotApiKey) orchestrator.registerProvider(new DiffbotProvider(config.diffbotApiKey), 9);
   if (config.browserbaseApiKey && config.browserbaseProjectId) orchestrator.registerProvider(new BrowserbaseProvider(config.browserbaseApiKey, config.browserbaseProjectId), 10);
+  if (config.agentqlApiKey) orchestrator.registerProvider(new AgentQlProvider(config.agentqlApiKey), 11);
+  if (config.firecrawlApiKey) orchestrator.registerProvider(new FirecrawlProvider(config.firecrawlApiKey), 12);
+  if (config.scrapegraphApiKey) orchestrator.registerProvider(new ScrapeGraphProvider(config.scrapegraphApiKey), 13);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const listBuilder = new ListBuilder();

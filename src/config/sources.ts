@@ -151,4 +151,42 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 50,
     apiBaseUrl: 'https://api.browserbase.com/v1',
   },
+  {
+    name: 'agentql',
+    displayName: 'AgentQL',
+    type: 'scraping',
+    priority: 11,
+    capabilities: ['company_enrich'],
+    costPerOperation: {
+      company_enrich: { baseCostCredits: 1, description: '~$0.015-0.02 per API call' },
+    },
+    rateLimitPerMinute: 50,
+    apiBaseUrl: 'https://api.agentql.com/v1',
+  },
+  {
+    name: 'firecrawl',
+    displayName: 'Firecrawl',
+    type: 'scraping',
+    priority: 12,
+    capabilities: ['company_search', 'company_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 1, description: '2 credits per 10 search results' },
+      company_enrich: { baseCostCredits: 2, description: '1-5 credits per extract job' },
+    },
+    rateLimitPerMinute: 100,
+    apiBaseUrl: 'https://api.firecrawl.dev/v2',
+  },
+  {
+    name: 'scrapegraph',
+    displayName: 'ScrapeGraphAI',
+    type: 'scraping',
+    priority: 13,
+    capabilities: ['company_search', 'company_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 3, description: '30 credits per search query' },
+      company_enrich: { baseCostCredits: 1, description: '10 credits per SmartScraper page' },
+    },
+    rateLimitPerMinute: 60,
+    apiBaseUrl: 'https://api.scrapegraphai.com/v1',
+  },
 ];

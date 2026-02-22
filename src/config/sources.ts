@@ -97,4 +97,17 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 300,
     apiBaseUrl: 'https://api.apify.com/v2',
   },
+  {
+    name: 'parallel',
+    displayName: 'Parallel.ai',
+    type: 'enrichment',
+    priority: 7,
+    capabilities: ['company_enrich', 'people_enrich'],
+    costPerOperation: {
+      company_enrich: { baseCostCredits: 1, description: '~$0.20 per pro task' },
+      people_enrich: { baseCostCredits: 1, description: '~$0.20 per pro task' },
+    },
+    rateLimitPerMinute: 2000,
+    apiBaseUrl: 'https://api.parallel.ai',
+  },
 ];

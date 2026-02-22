@@ -14,6 +14,7 @@ import { ProspeoProvider } from './providers/prospeo/index.js';
 import { ExaProvider } from './providers/exa/index.js';
 import { TavilyProvider } from './providers/tavily/index.js';
 import { ApifyProvider } from './providers/apify/index.js';
+import { ParallelProvider } from './providers/parallel/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -49,6 +50,7 @@ async function main() {
   if (config.exaApiKey) orchestrator.registerProvider(new ExaProvider(config.exaApiKey), 4);
   if (config.tavilyApiKey) orchestrator.registerProvider(new TavilyProvider(config.tavilyApiKey), 5);
   if (config.apifyApiKey) orchestrator.registerProvider(new ApifyProvider(config.apifyApiKey), 6);
+  if (config.parallelApiKey) orchestrator.registerProvider(new ParallelProvider(config.parallelApiKey), 7);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const listBuilder = new ListBuilder();

@@ -14,6 +14,7 @@ const envSchema = z.object({
   EXA_API_KEY: z.string().optional(),
   TAVILY_API_KEY: z.string().optional(),
   APIFY_API_KEY: z.string().optional(),
+  PARALLEL_API_KEY: z.string().optional(),
 
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
@@ -40,6 +41,7 @@ export const config = {
   exaApiKey: parsed.data.EXA_API_KEY,
   tavilyApiKey: parsed.data.TAVILY_API_KEY,
   apifyApiKey: parsed.data.APIFY_API_KEY,
+  parallelApiKey: parsed.data.PARALLEL_API_KEY,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

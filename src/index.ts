@@ -11,6 +11,7 @@ import { IcpParser } from './services/icp-engine/parser.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
 import { ProspeoProvider } from './providers/prospeo/index.js';
+import { ExaProvider } from './providers/exa/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -43,6 +44,7 @@ async function main() {
   orchestrator.registerProvider(new ApolloProvider(config.apolloApiKey), 1);
   orchestrator.registerProvider(new LeadMagicProvider(config.leadmagicApiKey), 2);
   orchestrator.registerProvider(new ProspeoProvider(config.prospeoApiKey), 3);
+  if (config.exaApiKey) orchestrator.registerProvider(new ExaProvider(config.exaApiKey), 4);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const listBuilder = new ListBuilder();

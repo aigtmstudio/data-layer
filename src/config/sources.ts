@@ -58,4 +58,17 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 60,
     apiBaseUrl: 'https://api.prospeo.io',
   },
+  {
+    name: 'exa',
+    displayName: 'Exa.ai',
+    type: 'search',
+    priority: 4,
+    capabilities: ['company_search', 'company_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 0.5, description: '$5 per 1k searches' },
+      company_enrich: { baseCostCredits: 0.3, description: '$3 per 1k content extractions' },
+    },
+    rateLimitPerMinute: 600,
+    apiBaseUrl: 'https://api.exa.ai',
+  },
 ];

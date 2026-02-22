@@ -47,7 +47,7 @@ async function main() {
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const listBuilder = new ListBuilder();
   const exportEngine = new ExportEngine();
-  const icpParser = new IcpParser(config.openaiApiKey);
+  const icpParser = new IcpParser(config.anthropicApiKey);
   const scheduler = new Scheduler(config.databaseUrl);
 
   // 3. Store in container

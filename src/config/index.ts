@@ -5,7 +5,7 @@ const envSchema = z.object({
   API_PORT: z.coerce.number().default(3000),
   API_KEY: z.string().min(1),
 
-  OPENAI_API_KEY: z.string().min(1),
+  ANTHROPIC_API_KEY: z.string().min(1),
 
   APOLLO_API_KEY: z.string().min(1),
   LEADMAGIC_API_KEY: z.string().min(1),
@@ -29,7 +29,7 @@ export const config = {
   databaseUrl: parsed.data.DATABASE_URL,
   apiPort: parsed.data.API_PORT,
   apiKey: parsed.data.API_KEY,
-  openaiApiKey: parsed.data.OPENAI_API_KEY,
+  anthropicApiKey: parsed.data.ANTHROPIC_API_KEY,
   apolloApiKey: parsed.data.APOLLO_API_KEY,
   leadmagicApiKey: parsed.data.LEADMAGIC_API_KEY,
   prospeoApiKey: parsed.data.PROSPEO_API_KEY,

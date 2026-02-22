@@ -1,4 +1,4 @@
-import OpenAI from 'openai';
+import Anthropic from '@anthropic-ai/sdk';
 import type { IcpFilters } from '../../db/schema/icps.js';
 import { logger } from '../../lib/logger.js';
 
@@ -34,26 +34,26 @@ Rules:
 - Omit fields that cannot be determined (set to null or empty array)`;
 
 export class IcpParser {
-  private openai: OpenAI;
+  private anthropic: Anthropic;
 
   constructor(apiKey: string) {
-    this.openai = new OpenAI({ apiKey });
+    this.anthropic = new Anthropic({ apiKey });
   }
 
   async parseNaturalLanguage(input: string): Promise<{ filters: IcpFilters; confidence: number }> {
     logger.info({ inputLength: input.length }, 'Parsing ICP from natural language');
 
-    const completion = await this.openai.chat.completions.create({
-      model: 'gpt-4o',
+    const message = await this.anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 1024,
+      system: SYSTEM_PROMPT,
       messages: [
-        { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: input },
       ],
-      response_format: { type: 'json_object' },
-      temperature: 0.1,
     });
 
-    const content = completion.choices[0].message.content;
+    const textBlock = message.content.find(b => b.type === 'text');
+    const content = textBlock?.text;
     if (!content) throw new Error('Empty response from LLM');
 
     const parsed = JSON.parse(content);

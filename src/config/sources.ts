@@ -110,4 +110,33 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 2000,
     apiBaseUrl: 'https://api.parallel.ai',
   },
+  {
+    name: 'valyu',
+    displayName: 'Valyu',
+    type: 'search',
+    priority: 8,
+    capabilities: ['company_search', 'company_enrich'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 0.15, description: '$1.50 per 1k web searches' },
+      company_enrich: { baseCostCredits: 0.1, description: '$0.001 per URL + AI summary' },
+    },
+    rateLimitPerMinute: 300,
+    apiBaseUrl: 'https://api.valyu.ai/v1',
+  },
+  {
+    name: 'diffbot',
+    displayName: 'Diffbot',
+    type: 'enrichment',
+    priority: 9,
+    capabilities: ['company_search', 'company_enrich', 'people_search', 'people_enrich', 'email_find'],
+    costPerOperation: {
+      company_search: { baseCostCredits: 0.5, description: '~0.5 credits per DQL search result' },
+      company_enrich: { baseCostCredits: 1, description: '25 KG credits per Enhance entity' },
+      people_search: { baseCostCredits: 0.5, description: '~0.5 credits per DQL search result' },
+      people_enrich: { baseCostCredits: 1, description: '25 KG credits per Enhance entity' },
+      email_find: { baseCostCredits: 1, description: '25 KG credits via person Enhance' },
+    },
+    rateLimitPerMinute: 300,
+    apiBaseUrl: 'https://kg.diffbot.com/kg/v3',
+  },
 ];

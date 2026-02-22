@@ -15,6 +15,8 @@ import { ExaProvider } from './providers/exa/index.js';
 import { TavilyProvider } from './providers/tavily/index.js';
 import { ApifyProvider } from './providers/apify/index.js';
 import { ParallelProvider } from './providers/parallel/index.js';
+import { ValyuProvider } from './providers/valyu/index.js';
+import { DiffbotProvider } from './providers/diffbot/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -51,6 +53,8 @@ async function main() {
   if (config.tavilyApiKey) orchestrator.registerProvider(new TavilyProvider(config.tavilyApiKey), 5);
   if (config.apifyApiKey) orchestrator.registerProvider(new ApifyProvider(config.apifyApiKey), 6);
   if (config.parallelApiKey) orchestrator.registerProvider(new ParallelProvider(config.parallelApiKey), 7);
+  if (config.valyuApiKey) orchestrator.registerProvider(new ValyuProvider(config.valyuApiKey), 8);
+  if (config.diffbotApiKey) orchestrator.registerProvider(new DiffbotProvider(config.diffbotApiKey), 9);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const listBuilder = new ListBuilder();

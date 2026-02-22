@@ -21,6 +21,7 @@ import {
 import { formatDate, formatRelativeTime, formatNumber } from '@/lib/utils';
 import { ArrowLeft, RefreshCw, Download, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ListMember } from '@/lib/types';
 
@@ -63,7 +64,7 @@ const memberColumns: ColumnDef<ListMember>[] = [
 export default function ListDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { selectedClientId } = useAppStore();
-  const { data: list, isLoading } = useList(id);
+  const { data: list, isLoading, isError, refetch } = useList(id);
   const { data: members } = useListMembers(id);
   const refreshList = useRefreshList();
   const triggerExport = useTriggerExport();
@@ -73,8 +74,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [refreshEnabled, setRefreshEnabled] = useState(false);
   const [refreshCron, setRefreshCron] = useState('');
 
-  if (isLoading || !list) {
+  if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
+  }
+
+  if (isError || !list) {
+    return <ErrorBanner title="List not found" description="Could not load list data. The API may be unavailable." retry={() => refetch()} />;
   }
 
   const handleRefresh = async () => {

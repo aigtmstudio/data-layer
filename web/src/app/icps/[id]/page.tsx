@@ -16,6 +16,7 @@ import { TagInput } from '@/components/shared/tag-input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ArrowLeft, Sparkles, Plus, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 import type { IcpFilters } from '@/lib/types';
 
 export default function IcpBuilderPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,7 +24,7 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
   const searchParams = useSearchParams();
   const clientId = searchParams.get('clientId');
 
-  const { data: icp, isLoading } = useIcp(clientId, icpId);
+  const { data: icp, isLoading, isError, refetch } = useIcp(clientId, icpId);
   const { data: personas } = usePersonas(clientId, icpId);
   const updateIcp = useUpdateIcp();
   const parseIcp = useParseIcp();
@@ -50,8 +51,8 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
     return <div className="flex items-center justify-center py-12">Loading...</div>;
   }
 
-  if (!icp) {
-    return <div className="flex items-center justify-center py-12">ICP not found</div>;
+  if (isError || !icp) {
+    return <ErrorBanner title="ICP not found" description="Could not load ICP data. The API may be unavailable." retry={() => refetch()} />;
   }
 
   const handleParse = async () => {

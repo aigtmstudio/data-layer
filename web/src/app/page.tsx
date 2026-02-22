@@ -11,10 +11,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { formatCurrency, formatRelativeTime, getJobStatusColor } from '@/lib/utils';
 import { Building2, Users, Wallet, Activity, Zap, List, Plus, TrendingUp, Receipt, DollarSign } from 'lucide-react';
+import { ErrorBanner } from '@/components/shared/error-banner';
 
 export default function DashboardPage() {
   const { selectedClientId } = useAppStore();
-  const { data: clients } = useClients();
+  const { data: clients, isError: clientsError, refetch: refetchClients } = useClients();
   const { data: jobs } = useJobs({ clientId: selectedClientId ?? undefined, limit: 10 });
   const { data: balance } = useCreditBalance(selectedClientId);
   const { data: history } = useCreditHistory(selectedClientId);
@@ -38,6 +39,10 @@ export default function DashboardPage() {
           {selectedClient ? `Overview for ${selectedClient.name}` : 'Select a client to get started'}
         </p>
       </div>
+
+      {clientsError && (
+        <ErrorBanner retry={() => refetchClients()} />
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <StatCard

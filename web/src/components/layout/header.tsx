@@ -16,27 +16,33 @@ import { Wallet } from 'lucide-react';
 
 export function Header() {
   const { selectedClientId, setSelectedClientId } = useAppStore();
-  const { data: clients } = useClients();
+  const { data: clients, isError: clientsError } = useClients();
   const { data: balance } = useCreditBalance(selectedClientId);
 
   return (
     <header className="flex h-14 items-center justify-between border-b bg-card px-6">
       <div className="flex items-center gap-4">
-        <Select
-          value={selectedClientId ?? ''}
-          onValueChange={(val) => setSelectedClientId(val || null)}
-        >
-          <SelectTrigger className="w-[220px]">
-            <SelectValue placeholder="Select a client" />
-          </SelectTrigger>
-          <SelectContent>
-            {clients?.map((client) => (
-              <SelectItem key={client.id} value={client.id}>
-                {client.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {clientsError ? (
+          <Badge variant="outline" className="text-muted-foreground">
+            API unavailable
+          </Badge>
+        ) : (
+          <Select
+            value={selectedClientId ?? ''}
+            onValueChange={(val) => setSelectedClientId(val || null)}
+          >
+            <SelectTrigger className="w-[220px]">
+              <SelectValue placeholder="Select a client" />
+            </SelectTrigger>
+            <SelectContent>
+              {clients?.map((client) => (
+                <SelectItem key={client.id} value={client.id}>
+                  {client.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <div className="flex items-center gap-3">

@@ -24,6 +24,7 @@ import {
 import { formatDate, formatRelativeTime, getJobStatusColor } from '@/lib/utils';
 import { Ban } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { Job } from '@/lib/types';
 
@@ -33,7 +34,7 @@ export default function JobsPage() {
   const cancelJob = useCancelJob();
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
 
-  const { data: jobs, isLoading } = useJobs({
+  const { data: jobs, isLoading, isError, refetch } = useJobs({
     clientId: selectedClientId ?? undefined,
     status: statusFilter !== 'all' ? statusFilter : undefined,
   });
@@ -167,6 +168,8 @@ export default function JobsPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">Loading...</div>
+      ) : isError ? (
+        <ErrorBanner retry={() => refetch()} />
       ) : (
         <DataTable columns={columns} data={jobs ?? []} />
       )}

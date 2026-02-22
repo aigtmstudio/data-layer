@@ -12,14 +12,20 @@ class ApiClient {
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${path}`;
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-        ...options.headers,
-      },
-    });
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.apiKey}`,
+          ...options.headers,
+        },
+      });
+    } catch {
+      throw new ApiError(0, 'NETWORK_ERROR', `Cannot connect to API at ${this.baseUrl}`);
+    }
 
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
@@ -61,6 +67,10 @@ export class ApiError extends Error {
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+  }
+
+  get isNetworkError() {
+    return this.code === 'NETWORK_ERROR';
   }
 }
 

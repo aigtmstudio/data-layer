@@ -17,6 +17,7 @@ import { DataTable } from '@/components/shared/data-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { CreditTransaction, Icp } from '@/lib/types';
 import {
@@ -64,7 +65,7 @@ const icpColumns: ColumnDef<Icp>[] = [
 
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
-  const { data: client, isLoading } = useClient(id);
+  const { data: client, isLoading, isError, refetch } = useClient(id);
   const updateClient = useUpdateClient();
   const { data: icps } = useIcps(id);
   const { data: balance } = useCreditBalance(id);
@@ -79,8 +80,12 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [newIcpName, setNewIcpName] = useState('');
   const [newIcpNl, setNewIcpNl] = useState('');
 
-  if (isLoading || !client) {
+  if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
+  }
+
+  if (isError || !client) {
+    return <ErrorBanner title="Client not found" description="Could not load client data. The API may be unavailable." retry={() => refetch()} />;
   }
 
   const handleToggleActive = async () => {

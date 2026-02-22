@@ -12,10 +12,11 @@ import { EmptyState } from '@/components/shared/empty-state';
 import { formatCurrency } from '@/lib/utils';
 import { Plus, Users, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 
 export default function ClientsPage() {
   const [formOpen, setFormOpen] = useState(false);
-  const { data: clients, isLoading } = useClients();
+  const { data: clients, isLoading, isError, refetch } = useClients();
   const createClient = useCreateClient();
   const { setSelectedClientId } = useAppStore();
 
@@ -32,6 +33,18 @@ export default function ClientsPage() {
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
+  }
+
+  if (isError) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Clients</h1>
+          <p className="text-muted-foreground">Manage your client accounts</p>
+        </div>
+        <ErrorBanner retry={() => refetch()} />
+      </div>
+    );
   }
 
   return (

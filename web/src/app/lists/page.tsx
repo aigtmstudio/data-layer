@@ -34,12 +34,13 @@ import {
 import { formatDate, formatRelativeTime, formatNumber } from '@/lib/utils';
 import { Plus, List, MoreHorizontal, Play, RefreshCw, Download } from 'lucide-react';
 import { toast } from 'sonner';
+import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { List as ListType } from '@/lib/types';
 
 export default function ListsPage() {
   const { selectedClientId } = useAppStore();
-  const { data: lists, isLoading } = useLists(selectedClientId ?? undefined);
+  const { data: lists, isLoading, isError, refetch } = useLists(selectedClientId ?? undefined);
   const { data: icps } = useIcps(selectedClientId);
   const createList = useCreateList();
   const buildList = useBuildList();
@@ -171,6 +172,8 @@ export default function ListsPage() {
 
       {isLoading ? (
         <div className="flex items-center justify-center py-12">Loading...</div>
+      ) : isError ? (
+        <ErrorBanner retry={() => refetch()} />
       ) : !lists?.length ? (
         <EmptyState
           icon={List}

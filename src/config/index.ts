@@ -17,6 +17,8 @@ const envSchema = z.object({
   PARALLEL_API_KEY: z.string().optional(),
   VALYU_API_KEY: z.string().optional(),
   DIFFBOT_API_KEY: z.string().optional(),
+  BROWSERBASE_API_KEY: z.string().optional(),
+  BROWSERBASE_PROJECT_ID: z.string().optional(),
 
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
@@ -46,6 +48,8 @@ export const config = {
   parallelApiKey: parsed.data.PARALLEL_API_KEY,
   valyuApiKey: parsed.data.VALYU_API_KEY,
   diffbotApiKey: parsed.data.DIFFBOT_API_KEY,
+  browserbaseApiKey: parsed.data.BROWSERBASE_API_KEY,
+  browserbaseProjectId: parsed.data.BROWSERBASE_PROJECT_ID,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

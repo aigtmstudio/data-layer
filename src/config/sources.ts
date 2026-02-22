@@ -139,4 +139,16 @@ export const DEFAULT_SOURCE_CONFIGS: DefaultSourceConfig[] = [
     rateLimitPerMinute: 300,
     apiBaseUrl: 'https://kg.diffbot.com/kg/v3',
   },
+  {
+    name: 'browserbase',
+    displayName: 'Browserbase',
+    type: 'scraping',
+    priority: 10,
+    capabilities: ['company_enrich'],
+    costPerOperation: {
+      company_enrich: { baseCostCredits: 1, description: '~$0.10/min browser session per enrichment' },
+    },
+    rateLimitPerMinute: 50,
+    apiBaseUrl: 'https://api.browserbase.com/v1',
+  },
 ];

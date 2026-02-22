@@ -1,0 +1,13 @@
+export { ClientProfileService } from './client-profile.js';
+export type { ClientProfileData } from './client-profile.js';
+export { SignalDetector } from './signal-detector.js';
+export type { DetectedSignal } from './signal-detector.js';
+export { IntelligenceScorer } from './intelligence-scorer.js';
+export type { ScoringWeights, IntelligenceScoreResult } from './intelligence-scorer.js';
+export { StrategyGenerator } from './strategy-generator.js';
+export { DynamicOrchestrator } from './dynamic-orchestrator.js';
+export type { IntelligentListParams } from './dynamic-orchestrator.js';
+export { ProviderPerformanceTracker } from './provider-performance-tracker.js';
+export type { PerformanceRecord, ProviderStats } from './provider-performance-tracker.js';
+export { PROVIDER_PROFILES, SIGNAL_DEFINITIONS, getProviderOriginalityWeight, rankProvidersForContext } from './provider-knowledge.js';
+export type { ProviderProfile } from './provider-knowledge.js';

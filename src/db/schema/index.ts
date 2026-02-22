@@ -8,3 +8,4 @@ export * from './lists.js';
 export * from './credits.js';
 export * from './jobs.js';
 export * from './data-sources.js';
+export * from './intelligence.js';

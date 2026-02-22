@@ -9,15 +9,18 @@ import type {
   EmailVerifyParams,
 } from '../../providers/types.js';
 import type { CreditManager } from '../credit-manager/index.js';
+import type { ProviderPerformanceTracker } from '../intelligence/provider-performance-tracker.js';
 import { logger } from '../../lib/logger.js';
 
-interface WaterfallConfig {
+export interface WaterfallConfig {
   qualityThreshold: number;
   maxProviders: number;
   requiredFields?: string[];
+  /** Override provider order instead of using static priority */
+  providerOverride?: string[];
 }
 
-interface WaterfallResult<T> {
+export interface WaterfallResult<T> {
   result: T | null;
   providersUsed: string[];
   totalCost: number;
@@ -30,19 +33,37 @@ const DEFAULT_CONFIG: WaterfallConfig = {
 
 export class SourceOrchestrator {
   private providers: Map<string, { provider: DataProvider; priority: number }> = new Map();
+  private performanceTracker?: ProviderPerformanceTracker;
 
   constructor(private creditManager: CreditManager) {}
+
+  setPerformanceTracker(tracker: ProviderPerformanceTracker): void {
+    this.performanceTracker = tracker;
+  }
 
   registerProvider(provider: DataProvider, priority: number): void {
     this.providers.set(provider.name, { provider, priority });
     logger.info({ provider: provider.name, priority, capabilities: provider.capabilities }, 'Provider registered');
   }
 
-  private getProvidersWithCapability(capability: ProviderCapability): DataProvider[] {
+  private getProvidersWithCapability(capability: ProviderCapability, providerOverride?: string[]): DataProvider[] {
+    if (providerOverride?.length) {
+      // Use override order, filtering to providers that have the capability
+      return providerOverride
+        .map(name => this.providers.get(name))
+        .filter((entry): entry is { provider: DataProvider; priority: number } =>
+          entry != null && entry.provider.capabilities.includes(capability))
+        .map(({ provider }) => provider);
+    }
     return Array.from(this.providers.values())
       .filter(({ provider }) => provider.capabilities.includes(capability))
       .sort((a, b) => a.priority - b.priority)
       .map(({ provider }) => provider);
+  }
+
+  /** Get all registered provider names */
+  getRegisteredProviders(): string[] {
+    return Array.from(this.providers.keys());
   }
 
   async enrichCompany(
@@ -55,7 +76,7 @@ export class SourceOrchestrator {
     const providersUsed: string[] = [];
     let totalCost = 0;
 
-    for (const provider of this.getProvidersWithCapability('company_enrich')) {
+    for (const provider of this.getProvidersWithCapability('company_enrich', cfg.providerOverride)) {
       if (providersUsed.length >= cfg.maxProviders) break;
       if (!provider.enrichCompany) continue;
 
@@ -65,7 +86,10 @@ export class SourceOrchestrator {
         continue;
       }
 
+      const startTime = Date.now();
       const response = await provider.enrichCompany(params);
+      const responseTimeMs = Date.now() - startTime;
+
       if (response.success && response.data) {
         await this.creditManager.charge(clientId, {
           baseCost: response.creditsConsumed,
@@ -75,6 +99,17 @@ export class SourceOrchestrator {
         });
         totalCost += response.creditsConsumed;
         providersUsed.push(provider.name);
+
+        // Track performance (fire-and-forget)
+        this.performanceTracker?.recordPerformance({
+          providerName: provider.name,
+          clientId,
+          operation: 'company_enrich',
+          qualityScore: response.qualityScore,
+          responseTimeMs,
+          fieldsPopulated: response.fieldsPopulated.length,
+          costCredits: response.creditsConsumed,
+        });
 
         merged = merged ? mergeCompanyData(merged, response.data) : response.data;
 
@@ -90,8 +125,9 @@ export class SourceOrchestrator {
   async searchPeople(
     clientId: string,
     params: PeopleSearchParams,
+    config?: { providerOverride?: string[] },
   ): Promise<WaterfallResult<UnifiedContact[]>> {
-    const providers = this.getProvidersWithCapability('people_search');
+    const providers = this.getProvidersWithCapability('people_search', config?.providerOverride);
     for (const provider of providers) {
       if (!provider.searchPeople) continue;
 

@@ -4,11 +4,13 @@ import { icps } from './icps.js';
 import { personas } from './personas.js';
 import { companies } from './companies.js';
 import { contacts } from './contacts.js';
+import { strategies } from './intelligence.js';
 import { listTypeEnum } from './enums.js';
 
 export interface ListFilterSnapshot {
   icpFilters: Record<string, unknown>;
   personaFilters?: Record<string, unknown>;
+  strategy?: Record<string, unknown>;
   appliedAt: string;
 }
 
@@ -17,6 +19,7 @@ export const lists = pgTable('lists', {
   clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
   icpId: uuid('icp_id').references(() => icps.id, { onDelete: 'set null' }),
   personaId: uuid('persona_id').references(() => personas.id, { onDelete: 'set null' }),
+  strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
 
   name: text('name').notNull(),
   description: text('description'),
@@ -45,6 +48,9 @@ export const listMembers = pgTable('list_members', {
   contactId: uuid('contact_id').references(() => contacts.id, { onDelete: 'cascade' }),
 
   icpFitScore: numeric('icp_fit_score', { precision: 3, scale: 2 }),
+  signalScore: numeric('signal_score', { precision: 3, scale: 2 }),
+  originalityScore: numeric('originality_score', { precision: 3, scale: 2 }),
+  intelligenceScore: numeric('intelligence_score', { precision: 3, scale: 2 }),
   addedReason: text('added_reason'),
 
   addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),

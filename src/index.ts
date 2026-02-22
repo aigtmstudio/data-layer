@@ -8,6 +8,14 @@ import { EnrichmentPipeline } from './services/enrichment/index.js';
 import { ListBuilder } from './services/list-builder/index.js';
 import { ExportEngine } from './services/export/index.js';
 import { IcpParser } from './services/icp-engine/parser.js';
+import {
+  ProviderPerformanceTracker,
+  ClientProfileService,
+  SignalDetector,
+  IntelligenceScorer,
+  StrategyGenerator,
+  DynamicOrchestrator,
+} from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
 import { ProspeoProvider } from './providers/prospeo/index.js';
@@ -31,6 +39,13 @@ export interface ServiceContainer {
   exportEngine: ExportEngine;
   icpParser: IcpParser;
   scheduler: Scheduler;
+  // Intelligence layer
+  performanceTracker: ProviderPerformanceTracker;
+  clientProfileService: ClientProfileService;
+  signalDetector: SignalDetector;
+  intelligenceScorer: IntelligenceScorer;
+  strategyGenerator: StrategyGenerator;
+  dynamicOrchestrator: DynamicOrchestrator;
 }
 
 let container: ServiceContainer;
@@ -70,6 +85,18 @@ async function main() {
   const icpParser = new IcpParser(config.anthropicApiKey);
   const scheduler = new Scheduler(config.databaseUrl);
 
+  // Intelligence layer
+  const performanceTracker = new ProviderPerformanceTracker();
+  orchestrator.setPerformanceTracker(performanceTracker);
+
+  const clientProfileService = new ClientProfileService(orchestrator, config.anthropicApiKey);
+  const signalDetector = new SignalDetector(config.anthropicApiKey);
+  const intelligenceScorer = new IntelligenceScorer();
+  const strategyGenerator = new StrategyGenerator(config.anthropicApiKey, clientProfileService, performanceTracker);
+  const dynamicOrchestrator = new DynamicOrchestrator(
+    orchestrator, strategyGenerator, signalDetector, intelligenceScorer, clientProfileService,
+  );
+
   // 3. Store in container
   container = {
     creditManager,
@@ -79,6 +106,12 @@ async function main() {
     exportEngine,
     icpParser,
     scheduler,
+    performanceTracker,
+    clientProfileService,
+    signalDetector,
+    intelligenceScorer,
+    strategyGenerator,
+    dynamicOrchestrator,
   };
 
   // 4. Start scheduler with handlers

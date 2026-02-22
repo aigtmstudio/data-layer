@@ -47,6 +47,9 @@ export const companies = pgTable('companies', {
   apolloId: text('apollo_id'),
   leadmagicId: text('leadmagic_id'),
 
+  originalityScore: numeric('originality_score', { precision: 3, scale: 2 }),
+  sourceRarityScores: jsonb('source_rarity_scores').$type<Record<string, number>>(),
+
   lastEnrichedAt: timestamp('last_enriched_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

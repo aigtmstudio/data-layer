@@ -18,7 +18,7 @@ export class Scheduler {
       retryLimit: 3,
       retryDelay: 60,
       retryBackoff: true,
-      expireInHours: 24,
+      expireInHours: 23,
       archiveCompletedAfterSeconds: 7 * 24 * 3600,
     });
   }

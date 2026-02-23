@@ -3,6 +3,12 @@ import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
 import type { ProcessedSource, CrmInsights } from './source-processor.js';
 import { logger } from '../../lib/logger.js';
 
+function extractJson(text: string): unknown {
+  // Strip markdown code fences if present
+  const stripped = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+  return JSON.parse(stripped);
+}
+
 // ── Types ──
 
 export interface MultiSourceInput {
@@ -165,7 +171,7 @@ export class IcpParser {
     const content = textBlock?.text;
     if (!content) throw new Error('Empty response from LLM');
 
-    const parsed = JSON.parse(content);
+    const parsed = extractJson(content);
     const filters = cleanFilters(parsed);
 
     const fieldCount = Object.values(filters).filter(v =>
@@ -201,7 +207,7 @@ export class IcpParser {
     const content = textBlock?.text;
     if (!content) throw new Error('Empty response from LLM');
 
-    const parsed = JSON.parse(content);
+    const parsed = extractJson(content);
 
     // Clean and validate output
     const filters = cleanFilters(parsed.filters ?? parsed);

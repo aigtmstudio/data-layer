@@ -55,6 +55,17 @@ export const icpRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = as
     return { data: icps };
   });
 
+  // GET /api/clients/:clientId/icps/:id
+  app.get<{ Params: { clientId: string; id: string } }>('/:clientId/icps/:id', async (request, reply) => {
+    const db = getDb();
+    const [icp] = await db
+      .select()
+      .from(schema.icps)
+      .where(and(eq(schema.icps.id, request.params.id), eq(schema.icps.clientId, request.params.clientId)));
+    if (!icp) return reply.status(404).send({ error: 'ICP not found' });
+    return { data: icp };
+  });
+
   // POST /api/clients/:clientId/icps
   app.post<{ Params: { clientId: string } }>('/:clientId/icps', async (request, reply) => {
     const body = createIcpBody.parse(request.body);

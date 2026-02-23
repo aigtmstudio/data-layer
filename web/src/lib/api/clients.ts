@@ -38,3 +38,8 @@ export async function updateClient(
   const res = await apiClient.patch<ApiResponse<Client>>(`/api/clients/${id}`, data);
   return res.data;
 }
+
+export async function deleteClient(id: string): Promise<Client> {
+  const res = await apiClient.delete<ApiResponse<Client>>(`/api/clients/${id}`);
+  return res.data;
+}

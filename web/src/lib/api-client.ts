@@ -56,6 +56,25 @@ class ApiClient {
   async delete<T>(path: string): Promise<T> {
     return this.request<T>(path, { method: 'DELETE' });
   }
+
+  async postFormData<T>(path: string, formData: FormData): Promise<T> {
+    const url = `${this.baseUrl}${path}`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        body: formData,
+      });
+    } catch {
+      throw new ApiError(0, 'NETWORK_ERROR', `Cannot connect to API at ${this.baseUrl}`);
+    }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new ApiError(res.status, body.error || 'REQUEST_FAILED', body.message || res.statusText);
+    }
+    return res.json();
+  }
 }
 
 export class ApiError extends Error {

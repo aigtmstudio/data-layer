@@ -50,6 +50,20 @@ export interface IcpFilters {
   excludeDomains?: string[];
 }
 
+export interface IcpSourceRecord {
+  sourceType: 'document' | 'transcript' | 'classic' | 'crm_csv';
+  fileName?: string;
+  addedAt: string;
+  contribution: string[];
+}
+
+export interface ProviderSearchHints {
+  semanticSearchQuery?: string;
+  keywordSearchTerms?: string[];
+  industryNaicsMapping?: string[];
+  naturalLanguageDescription?: string;
+}
+
 export interface Icp {
   id: string;
   clientId: string;
@@ -57,11 +71,45 @@ export interface Icp {
   description: string | null;
   naturalLanguageInput: string | null;
   filters: IcpFilters;
+  sources: IcpSourceRecord[] | null;
+  providerHints: ProviderSearchHints | null;
+  suggestedPersonaId: string | null;
   aiParsingConfidence: string | null;
   lastParsedAt: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SourceUploadResponse {
+  sourceType: string;
+  fileName?: string;
+  textPreview?: string;
+  metadata: Record<string, unknown>;
+  pendingSources: number;
+  insights?: unknown;
+}
+
+export interface PendingSource {
+  sourceType: string;
+  textPreview?: string;
+  hasStructuredData: boolean;
+  hasCrmInsights: boolean;
+  metadata: Record<string, unknown>;
+}
+
+export interface ParseSourcesResponse {
+  icp: Icp;
+  providerHints: ProviderSearchHints;
+  suggestedPersona?: {
+    name: string;
+    reasoning: string;
+    titlePatterns: string[];
+    seniorityLevels: string[];
+    departments: string[];
+  };
+  sourceContributions: Record<string, string[]>;
+  confidence: number;
 }
 
 export interface Persona {

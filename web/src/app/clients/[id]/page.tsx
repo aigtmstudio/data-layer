@@ -2,7 +2,8 @@
 
 import { use, useState } from 'react';
 import Link from 'next/link';
-import { useClient, useUpdateClient } from '@/lib/hooks/use-clients';
+import { useRouter } from 'next/navigation';
+import { useClient, useUpdateClient, useDeleteClient } from '@/lib/hooks/use-clients';
 import { useIcps, useCreateIcp } from '@/lib/hooks/use-icps';
 import { useCreditBalance, useCreditHistory, useAddCredits } from '@/lib/hooks/use-credits';
 import { Button } from '@/components/ui/button';
@@ -15,7 +16,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { DataTable } from '@/components/shared/data-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -66,7 +67,9 @@ const icpColumns: ColumnDef<Icp>[] = [
 export default function ClientDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const { data: client, isLoading, isError, refetch } = useClient(id);
+  const router = useRouter();
   const updateClient = useUpdateClient();
+  const deleteClient = useDeleteClient();
   const { data: icps } = useIcps(id);
   const { data: balance } = useCreditBalance(id);
   const { data: history } = useCreditHistory(id);
@@ -94,6 +97,17 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       toast.success(client.isActive ? 'Client deactivated' : 'Client activated');
     } catch {
       toast.error('Failed to update client');
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`Delete "${client.name}"? This cannot be undone.`)) return;
+    try {
+      await deleteClient.mutateAsync(id);
+      toast.success('Client deleted');
+      router.push('/clients');
+    } catch {
+      toast.error('Failed to delete client');
     }
   };
 
@@ -146,13 +160,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <h1 className="text-2xl font-bold">{client.name}</h1>
           <p className="text-sm text-muted-foreground">{client.slug} {client.industry && `· ${client.industry}`}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="active-toggle" className="text-sm">Active</Label>
-          <Switch
-            id="active-toggle"
-            checked={client.isActive}
-            onCheckedChange={handleToggleActive}
-          />
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="active-toggle" className="text-sm">Active</Label>
+            <Switch
+              id="active-toggle"
+              checked={client.isActive}
+              onCheckedChange={handleToggleActive}
+            />
+          </div>
+          <Button variant="destructive" size="sm" onClick={handleDelete} disabled={deleteClient.isPending}>
+            <Trash2 className="mr-1 h-4 w-4" />
+            Delete
+          </Button>
         </div>
       </div>
 

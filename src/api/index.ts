@@ -20,7 +20,7 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   });
 
   // Plugins
-  await app.register(cors, { origin: true });
+  await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
   await app.register(authPlugin, { apiKey });
   await app.register(errorHandlerPlugin);

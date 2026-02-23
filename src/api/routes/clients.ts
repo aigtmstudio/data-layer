@@ -67,4 +67,15 @@ export const clientRoutes: FastifyPluginAsync = async (app) => {
       .returning();
     return { data: updated };
   });
+
+  // DELETE /api/clients/:id
+  app.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
+    const db = getDb();
+    const [deleted] = await db
+      .delete(schema.clients)
+      .where(eq(schema.clients.id, request.params.id))
+      .returning();
+    if (!deleted) return reply.status(404).send({ error: 'Client not found' });
+    return { data: deleted };
+  });
 };

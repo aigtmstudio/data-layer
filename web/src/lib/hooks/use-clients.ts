@@ -42,3 +42,13 @@ export function useUpdateClient() {
     },
   });
 }
+
+export function useDeleteClient() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => clientsApi.deleteClient(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: clientKeys.all });
+    },
+  });
+}

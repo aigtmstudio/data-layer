@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '@/lib/store';
 import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus } from '@/lib/hooks/use-lists';
 import { useIcps } from '@/lib/hooks/use-icps';
@@ -39,6 +40,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import type { List as ListType } from '@/lib/types';
 
 export default function ListsPage() {
+  const qc = useQueryClient();
   const { selectedClientId } = useAppStore();
   const { data: lists, isLoading, isError, refetch } = useLists(selectedClientId ?? undefined);
   const { data: icps } = useIcps(selectedClientId);
@@ -82,18 +84,20 @@ export default function ListsPage() {
     }
   };
 
-  // Show toast when build completes
+  // Show toast when build completes and refresh list data
   useEffect(() => {
     if (!buildingListId || !buildJob) return;
     if (buildJob.status === 'completed') {
       const output = buildJob.output as { companiesAdded?: number; contactsAdded?: number; companiesDiscovered?: number };
       toast.success(`Build complete: ${output.companiesAdded ?? 0} companies, ${output.contactsAdded ?? 0} contacts added`);
       setBuildingListId(null);
+      qc.invalidateQueries({ queryKey: ['lists', selectedClientId] });
     } else if (buildJob.status === 'failed') {
       toast.error('Build failed. Check job logs for details.');
       setBuildingListId(null);
+      qc.invalidateQueries({ queryKey: ['lists', selectedClientId] });
     }
-  }, [buildJob?.status, buildingListId]);
+  }, [buildJob?.status, buildingListId, qc, selectedClientId]);
 
   const handleRefresh = async (id: string) => {
     try {

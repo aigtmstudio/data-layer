@@ -55,7 +55,6 @@ export function useBuildList() {
 }
 
 export function useBuildStatus(listId: string | null) {
-  const qc = useQueryClient();
   return useQuery({
     queryKey: listKeys.buildStatus(listId!),
     queryFn: () => listsApi.getBuildStatus(listId!),
@@ -64,10 +63,6 @@ export function useBuildStatus(listId: string | null) {
       const status = query.state.data?.status;
       // Poll every 2s while pending/running, stop when done
       if (status === 'pending' || status === 'running') return 2000;
-      // Invalidate lists when job completes
-      if (status === 'completed') {
-        qc.invalidateQueries({ queryKey: ['lists'] });
-      }
       return false;
     },
     staleTime: 0,

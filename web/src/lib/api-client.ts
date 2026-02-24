@@ -13,13 +13,19 @@ class ApiClient {
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${path}`;
 
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${this.apiKey}`,
+    };
+    if (options.body) {
+      headers['Content-Type'] = 'application/json';
+    }
+
     let res: Response;
     try {
       res = await fetch(url, {
         ...options,
         headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
+          ...headers,
           ...options.headers,
         },
       });

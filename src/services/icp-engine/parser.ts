@@ -58,14 +58,36 @@ Return ONLY valid JSON matching this schema:
   "foundedBefore": number | null
 }
 
+CRITICAL — Logical consistency:
+Every filter must be internally consistent. Before outputting, review ALL filters and ask: "Would a real company matching this description actually have these attributes?"
+- Do NOT include funding stages unless the description explicitly mentions venture-backed or funded companies.
+- Do NOT include enterprise-only tools (Gong, Outreach, 6Sense) for ICPs targeting solopreneurs or micro-businesses.
+- Do NOT include countries beyond what is stated. "English-speaking" = US, GB, CA, AU, NZ, IE only.
+- Revenue should be proportional to employee count (solopreneurs: $0-$500K, not millions).
+
+Employee count interpretation:
+- "solopreneur" / "freelancer" / "self-employed" / "independent" = 1 (min and max both 1)
+- "micro-business" = 1-5
+- "small business" / "SMB" = 1-100
+- "startup" = 1-50
+- "mid-market" = 100-1000
+- "enterprise" = 1000+
+
+Revenue interpretation (proportional to company size):
+- Solopreneurs/freelancers: $0-$500K
+- Micro-businesses (1-10): $100K-$5M
+- Small businesses (10-50): $1M-$25M
+- Mid-market (100-1000): $10M-$500M
+- Enterprise (1000+): $100M+
+- Omit revenue (null) if the description doesn't provide enough signal.
+
 Rules:
 - Revenue values in USD (convert if described as "millions" or "billions")
-- Employee count: interpret "mid-market" as 100-1000, "enterprise" as 1000+, "SMB" as 1-100, "startup" as 1-50
-- Countries as ISO 2-letter codes (US, GB, DE, etc.)
-- For tech stack, list specific product names (e.g., "Salesforce" not "CRM")
+- Countries as ISO 2-letter codes (US, GB, CA, AU, etc.)
+- For tech stack, list specific product names that companies of this size would realistically use and pay for.
 - For signals, use snake_case descriptors (e.g., "recent_funding", "hiring_engineering", "new_product_launch")
-- Only include fields that are explicitly or strongly implied by the input
-- Omit fields that cannot be determined (set to null or empty array)`;
+- ONLY include fields that are explicitly or strongly implied by the input
+- Omit fields that cannot be determined (set to null or empty array) — do not guess`;
 
 // ── Multi-source prompt ──
 
@@ -120,6 +142,33 @@ Source priority rules:
 3. "Documents" and "Transcripts" are CONTEXT CLUES — extract implied ICP criteria from the content.
 4. When sources conflict, classic selectors win. Then CRM patterns. Then docs/transcripts.
 
+CRITICAL — Logical consistency:
+Every filter must be internally consistent with the ICP description. Before outputting, review ALL filters together and ask: "Would a real company matching this ICP actually have these attributes?"
+- If the ICP targets solopreneurs, freelancers, or self-employed individuals: employee count should be 1-1 or 1-2 max, revenue should be proportional (typically $0-$500K), funding stages should be EMPTY (solopreneurs don't raise VC), and tech stack should only include tools an individual would realistically use and pay for.
+- If the ICP targets small agencies or consultancies: employee count 2-25, revenue $100K-$5M, no VC funding unless explicitly stated.
+- If the ICP targets startups: employee count 1-50, revenue $0-$10M, funding stages only if growth-stage is mentioned.
+- Do NOT include funding stages unless the ICP explicitly involves venture-backed or funded companies.
+- Do NOT include tech tools that are only used by mid-market/enterprise companies (e.g., Gong, Outreach, 6Sense) for ICPs targeting solopreneurs or micro-businesses.
+- Do NOT include countries beyond what the sources actually indicate. If the ICP mentions "English-speaking" markets, only include countries where English is the primary business language (US, GB, CA, AU, NZ, IE). Do not add DE, FR, NL, etc.
+
+Employee count interpretation:
+- "solopreneur" / "freelancer" / "self-employed" / "independent" = 1 (set both min and max to 1)
+- "micro-business" / "1-person shop" = 1-5
+- "small business" / "SMB" = 1-100
+- "startup" = 1-50
+- "mid-market" = 100-1000
+- "enterprise" = 1000+
+- Always match the employee range to what the source material actually describes. Do not default to broad ranges.
+
+Revenue interpretation:
+- Revenue should be proportional to employee count and company type.
+- Solopreneurs/freelancers: typically $0-$500K (may be higher for consultants, but rarely above $1M)
+- Micro-businesses (1-10): $100K-$5M
+- Small businesses (10-50): $1M-$25M
+- Mid-market (100-1000): $10M-$500M
+- Enterprise (1000+): $100M+
+- Only set revenue if the sources provide enough signal. When in doubt, omit it (set to null).
+
 Provider optimization rules:
 - "semanticSearchQuery": Write a natural language search query (2-3 sentences) describing the ideal company, suitable for web/content search engines like Exa, Tavily, or Valyu. Be specific and descriptive.
 - "keywordSearchTerms": Extract 5-15 highly specific keyword phrases that differentiate this ICP. Use terms that appear in company descriptions, not generic industry words.
@@ -127,21 +176,22 @@ Provider optimization rules:
 - "naturalLanguageDescription": Write a 2-3 sentence human-readable summary of who this ICP targets.
 
 suggestedPersona rules:
-- Only generate if explicitly requested OR if call transcripts or CRM data clearly reveal buyer personas.
+- Only generate if explicitly requested via "Generate persona: YES".
+- The persona MUST be the decision-maker or buyer at the ICP's target companies. It must be someone who works AT the type of company described by the ICP, not a random senior title.
+- For solopreneurs/freelancers: the persona IS the solopreneur themselves (e.g., "Independent Consultant", "Freelance Designer"). They don't have departments or hierarchies.
 - titlePatterns: Use wildcard patterns like "VP of *", "Director of Engineering", "Head of *".
-- seniorityLevels: One or more of: "c_suite", "vp", "director", "manager", "senior", "entry".
-- departments: Functional areas like "Engineering", "Marketing", "Sales", "IT", "Operations", "Finance".
-- Set to null if there isn't enough signal to suggest a persona.
+- seniorityLevels: One or more of: "c_suite", "vp", "director", "manager", "senior", "entry", "owner".
+- departments: Functional areas like "Engineering", "Marketing", "Sales", "IT", "Operations", "Finance". Leave empty for solopreneurs.
+- Set to null if "Generate persona: NO" or there isn't enough signal.
 
 General rules:
 - Revenue values in USD (convert "millions"/"billions")
-- Employee count: "mid-market" = 100-1000, "enterprise" = 1000+, "SMB" = 1-100, "startup" = 1-50
-- Countries as ISO 2-letter codes (US, GB, DE, etc.)
-- techStack: specific product names (e.g., "Salesforce" not "CRM")
+- Countries as ISO 2-letter codes (US, GB, CA, AU, etc.)
+- techStack: specific product names that companies in this ICP would realistically use and pay for. Consider the company size — solopreneurs use tools like Calendly, Notion, Canva, not enterprise tools like Gong or Outreach.
 - signals: snake_case descriptors (e.g., "recent_funding", "hiring_engineering")
 - confidence: 0-1 based on how much supporting evidence exists across sources
 - sourceContributions: list which fields each source type influenced (e.g., ["industries", "employeeCountMin"])
-- Omit fields that cannot be determined (null or empty array)`;
+- ONLY include fields with actual evidence from the sources. Do not guess or pad with plausible-sounding values. When unsure, omit (null or empty array).`;
 
 // ── Parser class ──
 

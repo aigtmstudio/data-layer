@@ -19,7 +19,15 @@ export async function createClient(data: {
   notes?: string;
   creditMarginPercent?: string;
 }): Promise<Client> {
-  const res = await apiClient.post<ApiResponse<Client>>('/api/clients', data);
+  const body: Record<string, unknown> = {
+    name: data.name,
+    slug: data.slug,
+  };
+  if (data.industry) body.industry = data.industry;
+  if (data.website) body.website = data.website;
+  if (data.notes) body.notes = data.notes;
+  if (data.creditMarginPercent) body.creditMarginPercent = parseFloat(data.creditMarginPercent);
+  const res = await apiClient.post<ApiResponse<Client>>('/api/clients', body);
   return res.data;
 }
 

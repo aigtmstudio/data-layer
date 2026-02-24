@@ -49,3 +49,20 @@ export function useUpdatePersona() {
       qc.invalidateQueries({ queryKey: personaKeys.all(clientId, icpId) }),
   });
 }
+
+export function useDeletePersona() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      clientId,
+      icpId,
+      personaId,
+    }: {
+      clientId: string;
+      icpId: string;
+      personaId: string;
+    }) => personasApi.deletePersona(clientId, icpId, personaId),
+    onSuccess: (_, { clientId, icpId }) =>
+      qc.invalidateQueries({ queryKey: personaKeys.all(clientId, icpId) }),
+  });
+}

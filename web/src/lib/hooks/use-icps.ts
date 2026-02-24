@@ -37,6 +37,17 @@ export function useCreateIcp() {
   });
 }
 
+export function useDeleteIcp() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, icpId }: { clientId: string; icpId: string }) =>
+      icpsApi.deleteIcp(clientId, icpId),
+    onSuccess: (_, { clientId }) => {
+      qc.invalidateQueries({ queryKey: icpKeys.all(clientId) });
+    },
+  });
+}
+
 export function useUpdateIcp() {
   const qc = useQueryClient();
   return useMutation({

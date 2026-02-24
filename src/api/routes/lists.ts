@@ -1,9 +1,9 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, isNull } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql } from 'drizzle-orm';
 import type { ServiceContainer } from '../../index.js';
-import { JOB_TYPES } from '../../services/scheduler/index.js';
+import { logger } from '../../lib/logger.js';
 
 const createListBody = z.object({
   clientId: z.string().uuid(),
@@ -48,21 +48,67 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
   });
 
   // POST /api/lists/:id/build
-  app.post<{ Params: { id: string } }>('/:id/build', async (request) => {
+  app.post<{ Params: { id: string } }>('/:id/build', async (request, reply) => {
     const db = getDb();
     const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
     if (!list || !list.icpId) {
-      return { error: 'List not found or has no ICP assigned' };
+      return reply.status(400).send({ error: 'List not found or has no ICP assigned' });
     }
 
-    const result = await opts.container.listBuilder.buildList({
-      clientId: list.clientId,
-      listId: list.id,
-      icpId: list.icpId,
-      personaId: list.personaId ?? undefined,
-    });
+    // Create a job to track progress
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
+        clientId: list.clientId,
+        type: 'list_build',
+        status: 'pending',
+        input: { listId: list.id, icpId: list.icpId, personaId: list.personaId },
+      })
+      .returning();
 
-    return { data: result };
+    // Kick off build in background (fire-and-forget)
+    opts.container.listBuilder
+      .buildListWithDiscovery({
+        clientId: list.clientId,
+        listId: list.id,
+        icpId: list.icpId,
+        personaId: list.personaId ?? undefined,
+        jobId: job.id,
+      })
+      .catch(async (error) => {
+        logger.error({ error, listId: list.id, jobId: job.id }, 'List build with discovery failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            updatedAt: new Date(),
+            errors: [{ item: list.id, error: String(error), timestamp: new Date().toISOString() }],
+          })
+          .where(eq(schema.jobs.id, job.id));
+      });
+
+    return reply.status(202).send({ data: { jobId: job.id } });
+  });
+
+  // GET /api/lists/:id/build-status
+  app.get<{ Params: { id: string } }>('/:id/build-status', async (request, reply) => {
+    const db = getDb();
+    const [job] = await db
+      .select()
+      .from(schema.jobs)
+      .where(and(
+        eq(schema.jobs.type, 'list_build'),
+        sql`${schema.jobs.input}->>'listId' = ${request.params.id}`,
+      ))
+      .orderBy(desc(schema.jobs.createdAt))
+      .limit(1);
+
+    if (!job) {
+      return reply.status(404).send({ error: 'No build job found for this list' });
+    }
+
+    return { data: job };
   });
 
   // POST /api/lists/:id/refresh

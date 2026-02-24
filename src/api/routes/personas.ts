@@ -75,6 +75,20 @@ export const personaRoutes: FastifyPluginAsync<PersonaRouteOpts> = async (app, o
     },
   );
 
+  // DELETE /api/clients/:clientId/icps/:icpId/personas/:id
+  app.delete<{ Params: { clientId: string; icpId: string; id: string } }>(
+    '/:clientId/icps/:icpId/personas/:id',
+    async (request, reply) => {
+      const db = getDb();
+      const [deleted] = await db
+        .delete(schema.personas)
+        .where(eq(schema.personas.id, request.params.id))
+        .returning();
+      if (!deleted) return reply.status(404).send({ error: 'Persona not found' });
+      return { data: deleted };
+    },
+  );
+
   // POST /api/clients/:clientId/icps/:icpId/personas/auto-generate
   app.post<{ Params: { clientId: string; icpId: string } }>(
     '/:clientId/icps/:icpId/personas/auto-generate',

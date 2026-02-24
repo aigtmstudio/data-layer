@@ -3,10 +3,16 @@ import { eq, and, or, gte, lte, inArray, ilike, sql, isNull } from 'drizzle-orm'
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
 import type { UnifiedCompany } from '../../providers/types.js';
+import type { CompanyDiscoveryService } from '../company-discovery/index.js';
 import { NotFoundError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 
 export class ListBuilder {
+  private discoveryService?: CompanyDiscoveryService;
+
+  setDiscoveryService(service: CompanyDiscoveryService): void {
+    this.discoveryService = service;
+  }
   async buildList(params: {
     clientId: string;
     listId: string;
@@ -210,5 +216,69 @@ export class ListBuilder {
       .where(eq(schema.lists.id, listId));
 
     logger.info({ listId }, 'List refreshed');
+  }
+
+  async buildListWithDiscovery(params: {
+    clientId: string;
+    listId: string;
+    icpId: string;
+    personaId?: string;
+    limit?: number;
+    jobId: string;
+  }): Promise<{ companiesAdded: number; contactsAdded: number; discovery: import('../company-discovery/index.js').DiscoveryResult }> {
+    const db = getDb();
+
+    if (!this.discoveryService) {
+      throw new Error('CompanyDiscoveryService not configured');
+    }
+
+    // Step 1: Discover companies from external providers
+    logger.info({ listId: params.listId, icpId: params.icpId }, 'Starting list build with discovery');
+
+    const discovery = await this.discoveryService.discoverAndPopulate({
+      clientId: params.clientId,
+      icpId: params.icpId,
+      personaId: params.personaId,
+      limit: params.limit ?? 100,
+      jobId: params.jobId,
+    });
+
+    logger.info(
+      { listId: params.listId, ...discovery },
+      'Discovery phase complete, building list from DB',
+    );
+
+    // Step 2: Build list from the now-populated DB
+    const result = await this.buildList({
+      clientId: params.clientId,
+      listId: params.listId,
+      icpId: params.icpId,
+      personaId: params.personaId,
+      limit: params.limit,
+    });
+
+    // Step 3: Update job as completed
+    await db
+      .update(schema.jobs)
+      .set({
+        status: 'completed',
+        completedAt: new Date(),
+        updatedAt: new Date(),
+        output: {
+          companiesAdded: result.companiesAdded,
+          contactsAdded: result.contactsAdded,
+          companiesDiscovered: discovery.companiesDiscovered,
+          companiesScored: discovery.companiesScored,
+          providersUsed: discovery.providersUsed,
+        },
+      })
+      .where(eq(schema.jobs.id, params.jobId));
+
+    logger.info(
+      { listId: params.listId, companiesAdded: result.companiesAdded, contactsAdded: result.contactsAdded },
+      'List build with discovery complete',
+    );
+
+    return { ...result, discovery };
   }
 }

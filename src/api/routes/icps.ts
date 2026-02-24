@@ -109,6 +109,19 @@ export const icpRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = as
     return { data: updated };
   });
 
+  // DELETE /api/clients/:clientId/icps/:id
+  app.delete<{ Params: { clientId: string; id: string } }>('/:clientId/icps/:id', async (request, reply) => {
+    const db = getDb();
+    const [deleted] = await db
+      .delete(schema.icps)
+      .where(and(eq(schema.icps.id, request.params.id), eq(schema.icps.clientId, request.params.clientId)))
+      .returning();
+    if (!deleted) return reply.status(404).send({ error: 'ICP not found' });
+    // Clean up pending sources for this ICP
+    pendingSources.delete(request.params.id);
+    return { data: deleted };
+  });
+
   // POST /api/clients/:clientId/icps/:id/parse — re-parse NL to structured
   app.post<{ Params: { clientId: string; id: string } }>('/:clientId/icps/:id/parse', async (request) => {
     const db = getDb();

@@ -80,7 +80,13 @@ export interface CompanySearchParams {
   industries?: string[];
   employeeCountMin?: number;
   employeeCountMax?: number;
+  revenueMin?: number;
+  revenueMax?: number;
+  fundingStages?: string[];
+  techStack?: string[];
   countries?: string[];
+  states?: string[];
+  cities?: string[];
   keywords?: string[];
   limit?: number;
   offset?: number;

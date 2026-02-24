@@ -4,7 +4,7 @@ import { use, useState, useRef } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useIcp, useUpdateIcp, useParseIcp, useSources, useUploadDocument, useAddTranscript, useUploadCrmCsv, useClearSources, useParseSources } from '@/lib/hooks/use-icps';
-import { usePersonas, useCreatePersona } from '@/lib/hooks/use-personas';
+import { usePersonas, useCreatePersona, useDeletePersona } from '@/lib/hooks/use-personas';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -31,6 +31,7 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
   const updateIcp = useUpdateIcp();
   const parseIcp = useParseIcp();
   const createPersona = useCreatePersona();
+  const deletePersona = useDeletePersona();
   const uploadDocument = useUploadDocument();
   const addTranscript = useAddTranscript();
   const uploadCrmCsv = useUploadCrmCsv();
@@ -116,6 +117,15 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
       toast.success('Persona created');
     } catch {
       toast.error('Failed to create persona');
+    }
+  };
+
+  const handleDeletePersona = async (personaId: string) => {
+    try {
+      await deletePersona.mutateAsync({ clientId, icpId, personaId });
+      toast.success('Persona deleted');
+    } catch {
+      toast.error('Failed to delete persona');
     }
   };
 
@@ -531,8 +541,17 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
             <div className="grid gap-4 md:grid-cols-2">
               {personas.map((persona) => (
                 <Card key={persona.id}>
-                  <CardHeader className="pb-2">
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                     <CardTitle className="text-base">{persona.name}</CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDeletePersona(persona.id)}
+                      disabled={deletePersona.isPending}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </CardHeader>
                   <CardContent className="space-y-2">
                     {persona.titlePatterns.length > 0 && (

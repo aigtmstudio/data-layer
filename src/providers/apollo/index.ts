@@ -55,8 +55,26 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
           `${params.employeeCountMin ?? 1},${params.employeeCountMax ?? 1000000}`,
         ];
       }
-      if (params.countries?.length) body.organization_locations = params.countries;
+      if (params.revenueMin || params.revenueMax) {
+        body.organization_revenue_ranges = [
+          `${params.revenueMin ?? 0},${params.revenueMax ?? 10000000000}`,
+        ];
+      }
+      if (params.fundingStages?.length) {
+        body.organization_latest_funding_stage_cd = params.fundingStages;
+      }
+
+      // Build location filters: countries + states + cities
+      const locations: string[] = [];
+      if (params.countries?.length) locations.push(...params.countries);
+      if (params.states?.length) locations.push(...params.states);
+      if (params.cities?.length) locations.push(...params.cities);
+      if (locations.length) body.organization_locations = locations;
+
       if (params.keywords?.length) body.q_organization_keyword_tags = params.keywords;
+      if (params.techStack?.length) {
+        body.currently_using_any_of_technology_uids = params.techStack;
+      }
 
       const raw = await this.request<ApolloCompanySearchResponse>(
         'post', '/mixed_companies/search', { body },

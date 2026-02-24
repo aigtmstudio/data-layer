@@ -1,5 +1,5 @@
 import { apiClient } from '../api-client';
-import type { List, ListMember, ListType, ApiResponse } from '../types';
+import type { List, ListMember, ListType, Job, ApiResponse } from '../types';
 
 export async function getLists(clientId?: string): Promise<List[]> {
   const query = clientId ? `?clientId=${clientId}` : '';
@@ -39,6 +39,11 @@ export async function updateListSchedule(
   data: { refreshEnabled: boolean; refreshCron?: string },
 ): Promise<List> {
   const res = await apiClient.patch<ApiResponse<List>>(`/api/lists/${id}/schedule`, data);
+  return res.data;
+}
+
+export async function getBuildStatus(id: string): Promise<Job> {
+  const res = await apiClient.get<ApiResponse<Job>>(`/api/lists/${id}/build-status`);
   return res.data;
 }
 

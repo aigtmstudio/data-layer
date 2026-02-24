@@ -31,6 +31,7 @@ import { BrowserbaseProvider } from './providers/browserbase/index.js';
 import { AgentQlProvider } from './providers/agentql/index.js';
 import { FirecrawlProvider } from './providers/firecrawl/index.js';
 import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
+import { CompanyDiscoveryService } from './services/company-discovery/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -83,7 +84,9 @@ async function main() {
   if (config.scrapegraphApiKey) orchestrator.registerProvider(new ScrapeGraphProvider(config.scrapegraphApiKey), 13);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
+  const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline);
   const listBuilder = new ListBuilder();
+  listBuilder.setDiscoveryService(discoveryService);
   const exportEngine = new ExportEngine();
   const icpParser = new IcpParser(config.anthropicApiKey);
   const documentExtractor = new DocumentExtractor();

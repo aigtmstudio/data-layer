@@ -39,6 +39,11 @@ export async function updateIcp(
   return res.data;
 }
 
+export async function deleteIcp(clientId: string, icpId: string): Promise<Icp> {
+  const res = await apiClient.delete<ApiResponse<Icp>>(`/api/clients/${clientId}/icps/${icpId}`);
+  return res.data;
+}
+
 export async function parseIcp(clientId: string, icpId: string): Promise<Icp> {
   const res = await apiClient.post<ApiResponse<Icp>>(`/api/clients/${clientId}/icps/${icpId}/parse`);
   return res.data;

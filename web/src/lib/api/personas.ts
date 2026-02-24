@@ -53,3 +53,14 @@ export async function updatePersona(
   );
   return res.data;
 }
+
+export async function deletePersona(
+  clientId: string,
+  icpId: string,
+  personaId: string,
+): Promise<Persona> {
+  const res = await apiClient.delete<ApiResponse<Persona>>(
+    `/api/clients/${clientId}/icps/${icpId}/personas/${personaId}`,
+  );
+  return res.data;
+}

@@ -4,7 +4,7 @@ import { use, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useClient, useUpdateClient, useDeleteClient } from '@/lib/hooks/use-clients';
-import { useIcps, useCreateIcp } from '@/lib/hooks/use-icps';
+import { useIcps, useCreateIcp, useDeleteIcp } from '@/lib/hooks/use-icps';
 import { useCreditBalance, useCreditHistory, useAddCredits } from '@/lib/hooks/use-credits';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -41,7 +41,7 @@ const creditColumns: ColumnDef<CreditTransaction>[] = [
   { accessorKey: 'createdAt', header: 'Date', cell: ({ row }) => formatDate(row.original.createdAt) },
 ];
 
-const icpColumns: ColumnDef<Icp>[] = [
+const baseIcpColumns: ColumnDef<Icp>[] = [
   { accessorKey: 'name', header: 'Name' },
   {
     accessorKey: 'naturalLanguageInput',
@@ -75,6 +75,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const { data: history } = useCreditHistory(id);
   const addCredits = useAddCredits();
   const createIcp = useCreateIcp();
+  const deleteIcp = useDeleteIcp();
 
   const [addCreditsOpen, setAddCreditsOpen] = useState(false);
   const [creditAmount, setCreditAmount] = useState('');
@@ -125,6 +126,16 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
       toast.success('Credits added');
     } catch {
       toast.error('Failed to add credits');
+    }
+  };
+
+  const handleDeleteIcp = async (icpId: string, icpName: string) => {
+    if (!confirm(`Delete ICP "${icpName}"? This cannot be undone.`)) return;
+    try {
+      await deleteIcp.mutateAsync({ clientId: id, icpId });
+      toast.success('ICP deleted');
+    } catch {
+      toast.error('Failed to delete ICP');
     }
   };
 
@@ -296,7 +307,27 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </Button>
           </div>
           <DataTable
-            columns={icpColumns}
+            columns={[
+              ...baseIcpColumns,
+              {
+                id: 'actions',
+                header: '',
+                cell: ({ row }) => (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDeleteIcp(row.original.id, row.original.name);
+                    }}
+                    disabled={deleteIcp.isPending}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ),
+              },
+            ]}
             data={icps ?? []}
             onRowClick={(icp) => {
               window.location.href = `/icps/${icp.id}?clientId=${id}`;

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useAppStore } from '@/lib/store';
-import { useLists, useCreateList, useBuildList, useRefreshList } from '@/lib/hooks/use-lists';
+import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus } from '@/lib/hooks/use-lists';
 import { useIcps } from '@/lib/hooks/use-icps';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
 import { DataTable } from '@/components/shared/data-table';
@@ -32,7 +32,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatDate, formatRelativeTime, formatNumber } from '@/lib/utils';
-import { Plus, List, MoreHorizontal, Play, RefreshCw, Download } from 'lucide-react';
+import { Plus, List, MoreHorizontal, Play, RefreshCw, Download, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -51,6 +51,8 @@ export default function ListsPage() {
   const [newName, setNewName] = useState('');
   const [newIcpId, setNewIcpId] = useState('');
   const [newType, setNewType] = useState<'company' | 'contact' | 'mixed'>('contact');
+  const [buildingListId, setBuildingListId] = useState<string | null>(null);
+  const { data: buildJob } = useBuildStatus(buildingListId);
 
   const handleCreate = async () => {
     if (!newName.trim() || !selectedClientId) return;
@@ -73,11 +75,25 @@ export default function ListsPage() {
   const handleBuild = async (id: string) => {
     try {
       await buildList.mutateAsync(id);
-      toast.success('List build started');
+      setBuildingListId(id);
+      toast.success('Discovering companies from providers...');
     } catch {
       toast.error('Failed to start build');
     }
   };
+
+  // Show toast when build completes
+  useEffect(() => {
+    if (!buildingListId || !buildJob) return;
+    if (buildJob.status === 'completed') {
+      const output = buildJob.output as { companiesAdded?: number; contactsAdded?: number; companiesDiscovered?: number };
+      toast.success(`Build complete: ${output.companiesAdded ?? 0} companies, ${output.contactsAdded ?? 0} contacts added`);
+      setBuildingListId(null);
+    } else if (buildJob.status === 'failed') {
+      toast.error('Build failed. Check job logs for details.');
+      setBuildingListId(null);
+    }
+  }, [buildJob?.status, buildingListId]);
 
   const handleRefresh = async (id: string) => {
     try {
@@ -109,7 +125,14 @@ export default function ListsPage() {
       </Link>
     )},
     { accessorKey: 'type', header: 'Type', cell: ({ row }) => <Badge variant="outline">{row.original.type}</Badge> },
-    { accessorKey: 'memberCount', header: 'Members', cell: ({ row }) => formatNumber(row.original.memberCount) },
+    { accessorKey: 'memberCount', header: 'Members', cell: ({ row }) => (
+      buildingListId === row.original.id ? (
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Loader2 className="h-3 w-3 animate-spin" />
+          Building...
+        </span>
+      ) : formatNumber(row.original.memberCount)
+    )},
     { accessorKey: 'refreshEnabled', header: 'Refresh', cell: ({ row }) => (
       row.original.refreshEnabled ? (
         <Badge variant="secondary">Scheduled</Badge>
@@ -129,9 +152,16 @@ export default function ListsPage() {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleBuild(row.original.id)}>
-              <Play className="mr-2 h-4 w-4" />
-              Build
+            <DropdownMenuItem
+              onClick={() => handleBuild(row.original.id)}
+              disabled={buildingListId === row.original.id}
+            >
+              {buildingListId === row.original.id ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              {buildingListId === row.original.id ? 'Building...' : 'Build'}
             </DropdownMenuItem>
             <DropdownMenuItem onClick={() => handleRefresh(row.original.id)}>
               <RefreshCw className="mr-2 h-4 w-4" />

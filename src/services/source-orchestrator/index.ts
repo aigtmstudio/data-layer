@@ -1,6 +1,7 @@
 import type {
   DataProvider,
   ProviderCapability,
+  CompanySearchParams,
   UnifiedCompany,
   UnifiedContact,
   EmailVerificationResult,
@@ -120,6 +121,69 @@ export class SourceOrchestrator {
     }
 
     return { result: merged, providersUsed, totalCost };
+  }
+
+  async searchCompanies(
+    clientId: string,
+    params: CompanySearchParams,
+    config?: Partial<WaterfallConfig>,
+  ): Promise<WaterfallResult<UnifiedCompany[]>> {
+    const cfg = { ...DEFAULT_CONFIG, ...config };
+    const allResults: UnifiedCompany[] = [];
+    const providersUsed: string[] = [];
+    let totalCost = 0;
+    const seenDomains = new Set<string>();
+
+    for (const provider of this.getProvidersWithCapability('company_search', cfg.providerOverride)) {
+      if (providersUsed.length >= cfg.maxProviders) break;
+      if (!provider.searchCompanies) continue;
+
+      const hasCredits = await this.creditManager.hasBalance(clientId, 1);
+      if (!hasCredits) {
+        logger.warn({ clientId, provider: provider.name }, 'Insufficient credits, skipping');
+        continue;
+      }
+
+      const startTime = Date.now();
+      const response = await provider.searchCompanies(params);
+      const responseTimeMs = Date.now() - startTime;
+
+      if (response.success && response.data && response.data.length > 0) {
+        if (response.creditsConsumed > 0) {
+          await this.creditManager.charge(clientId, {
+            baseCost: response.creditsConsumed,
+            source: provider.name,
+            operation: 'company_search',
+            description: `Company search: ${params.keywords?.join(', ') ?? params.industries?.join(', ') ?? 'filters'}`,
+          });
+        }
+        totalCost += response.creditsConsumed;
+        providersUsed.push(provider.name);
+
+        this.performanceTracker?.recordPerformance({
+          providerName: provider.name,
+          clientId,
+          operation: 'company_search',
+          qualityScore: response.qualityScore,
+          responseTimeMs,
+          fieldsPopulated: response.fieldsPopulated.length,
+          costCredits: response.creditsConsumed,
+        });
+
+        // Deduplicate by domain across providers
+        for (const company of response.data) {
+          const key = company.domain?.toLowerCase();
+          if (key && seenDomains.has(key)) continue;
+          if (key) seenDomains.add(key);
+          allResults.push(company);
+        }
+
+        // For search, we accumulate results — stop when we have enough
+        if (allResults.length >= (params.limit ?? 100)) break;
+      }
+    }
+
+    return { result: allResults, providersUsed, totalCost };
   }
 
   async searchPeople(

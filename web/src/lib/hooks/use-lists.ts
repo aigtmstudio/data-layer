@@ -5,6 +5,7 @@ export const listKeys = {
   all: (clientId?: string) => clientId ? ['lists', clientId] as const : ['lists'] as const,
   detail: (id: string) => ['lists', 'detail', id] as const,
   members: (id: string) => ['lists', 'members', id] as const,
+  buildStatus: (id: string) => ['lists', 'build-status', id] as const,
 };
 
 export function useLists(clientId?: string) {
@@ -45,10 +46,31 @@ export function useBuildList() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: listsApi.buildList,
-    onSuccess: () => {
+    onSuccess: (_, listId) => {
       qc.invalidateQueries({ queryKey: ['lists'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.buildStatus(listId) });
     },
+  });
+}
+
+export function useBuildStatus(listId: string | null) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: listKeys.buildStatus(listId!),
+    queryFn: () => listsApi.getBuildStatus(listId!),
+    enabled: !!listId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      // Poll every 2s while pending/running, stop when done
+      if (status === 'pending' || status === 'running') return 2000;
+      // Invalidate lists when job completes
+      if (status === 'completed') {
+        qc.invalidateQueries({ queryKey: ['lists'] });
+      }
+      return false;
+    },
+    staleTime: 0,
   });
 }
 

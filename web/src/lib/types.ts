@@ -130,6 +130,8 @@ export interface Persona {
   updatedAt: string;
 }
 
+export type PipelineStage = 'tam' | 'active_segment' | 'qualified' | 'ready_to_approach' | 'in_sequence' | 'converted';
+
 export interface Company {
   id: string;
   clientId: string;
@@ -148,6 +150,8 @@ export interface Company {
   city: string | null;
   techStack: string[] | null;
   enrichmentScore: string | null;
+  pipelineStage: PipelineStage;
+  signalScore: string | null;
   lastEnrichedAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -185,7 +189,9 @@ export type JobType =
   | 'list_build'
   | 'list_refresh'
   | 'export'
-  | 'full_enrichment_pipeline';
+  | 'full_enrichment_pipeline'
+  | 'signal_hypothesis_generation'
+  | 'market_signal_processing';
 
 export interface Job {
   id: string;
@@ -277,6 +283,46 @@ export interface ExportRequest {
   listId: string;
   format: ExportFormat;
   destination?: Record<string, unknown>;
+}
+
+// Signal Pipeline types
+
+export type SignalCategory = 'regulatory' | 'economic' | 'technology' | 'competitive';
+export type HypothesisStatus = 'active' | 'paused' | 'retired';
+export type HypothesisValidation = 'llm_generated' | 'human_validated' | 'human_created';
+
+export interface SignalHypothesis {
+  id: string;
+  clientId: string;
+  icpId: string | null;
+  hypothesis: string;
+  signalCategory: SignalCategory;
+  monitoringSources: string[];
+  affectedSegments: string[];
+  priority: number;
+  status: HypothesisStatus;
+  validatedBy: HypothesisValidation;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MarketSignal {
+  id: string;
+  clientId: string;
+  hypothesisId: string | null;
+  signalCategory: SignalCategory | null;
+  headline: string;
+  summary: string | null;
+  sourceUrl: string | null;
+  sourceName: string | null;
+  relevanceScore: string | null;
+  affectedSegments: string[];
+  rawData: Record<string, unknown>;
+  processed: boolean;
+  detectedAt: string | null;
+  processedAt: string | null;
+  createdAt: string;
 }
 
 // API response wrapper

@@ -134,19 +134,31 @@ export class SourceOrchestrator {
     let totalCost = 0;
     const seenDomains = new Set<string>();
 
-    for (const provider of this.getProvidersWithCapability('company_search', cfg.providerOverride)) {
+    const searchProviders = this.getProvidersWithCapability('company_search', cfg.providerOverride);
+    logger.info(
+      { capability: 'company_search', providers: searchProviders.map(p => p.name), clientId },
+      'Providers available for company search',
+    );
+
+    for (const provider of searchProviders) {
       if (providersUsed.length >= cfg.maxProviders) break;
       if (!provider.searchCompanies) continue;
 
       const hasCredits = await this.creditManager.hasBalance(clientId, 1);
       if (!hasCredits) {
-        logger.warn({ clientId, provider: provider.name }, 'Insufficient credits, skipping');
+        logger.warn({ clientId, provider: provider.name }, 'Insufficient credits, skipping provider');
         continue;
       }
 
       const startTime = Date.now();
+      logger.info({ provider: provider.name, params }, 'Calling provider searchCompanies');
       const response = await provider.searchCompanies(params);
       const responseTimeMs = Date.now() - startTime;
+
+      logger.info(
+        { provider: provider.name, success: response.success, resultCount: response.data?.length ?? 0, responseTimeMs },
+        'Provider searchCompanies response',
+      );
 
       if (response.success && response.data && response.data.length > 0) {
         if (response.creditsConsumed > 0) {

@@ -12,6 +12,8 @@ export const jobTypeEnum = pgEnum('job_type', [
   'list_refresh',
   'export',
   'full_enrichment_pipeline',
+  'signal_hypothesis_generation',
+  'market_signal_processing',
 ]);
 
 export const creditTransactionTypeEnum = pgEnum('credit_transaction_type', [
@@ -30,4 +32,20 @@ export const listTypeEnum = pgEnum('list_type', ['company', 'contact', 'mixed'])
 
 export const exportFormatEnum = pgEnum('export_format', [
   'csv', 'excel', 'google_sheets', 'salesforce', 'hubspot',
+]);
+
+export const signalCategoryEnum = pgEnum('signal_category', [
+  'regulatory', 'economic', 'technology', 'competitive',
+]);
+
+export const hypothesisStatusEnum = pgEnum('hypothesis_status', [
+  'active', 'paused', 'retired',
+]);
+
+export const hypothesisValidationEnum = pgEnum('hypothesis_validation', [
+  'llm_generated', 'human_validated', 'human_created',
+]);
+
+export const pipelineStageEnum = pgEnum('pipeline_stage', [
+  'tam', 'active_segment', 'qualified', 'ready_to_approach', 'in_sequence', 'converted',
 ]);

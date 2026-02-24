@@ -97,7 +97,8 @@ export default function ListsPage() {
       setBuildingListId(null);
       qc.invalidateQueries({ queryKey: ['lists', selectedClientId] });
     }
-  }, [buildJob?.status, buildingListId, qc, selectedClientId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- qc is stable, selectedClientId captured in closure
+  }, [buildJob?.status, buildingListId]);
 
   const handleRefresh = async (id: string) => {
     try {

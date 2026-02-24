@@ -47,6 +47,20 @@ export async function getBuildStatus(id: string): Promise<Job> {
   return res.data;
 }
 
+interface RawListMember {
+  id: string;
+  companyId: string | null;
+  contactId: string | null;
+  icpFitScore: string | null;
+  addedReason: string | null;
+  addedAt: string;
+  companyName: string | null;
+  companyDomain: string | null;
+  contactName: string | null;
+  contactTitle: string | null;
+  contactEmail: string | null;
+}
+
 export async function getListMembers(
   id: string,
   params?: { limit?: number; offset?: number },
@@ -55,6 +69,28 @@ export async function getListMembers(
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.offset) query.set('offset', String(params.offset));
   const qs = query.toString() ? `?${query.toString()}` : '';
-  const res = await apiClient.get<ApiResponse<ListMember[]>>(`/api/lists/${id}/members${qs}`);
-  return res.data;
+  const res = await apiClient.get<ApiResponse<RawListMember[]>>(`/api/lists/${id}/members${qs}`);
+
+  // Transform flat API response into nested ListMember shape
+  return res.data.map((row) => ({
+    id: row.id,
+    listId: id,
+    companyId: row.companyId,
+    contactId: row.contactId,
+    icpFitScore: row.icpFitScore,
+    addedReason: row.addedReason,
+    addedAt: row.addedAt,
+    removedAt: null,
+    company: row.companyId
+      ? { name: row.companyName ?? '', domain: row.companyDomain } as ListMember['company']
+      : undefined,
+    contact: row.contactId
+      ? {
+          firstName: row.contactName?.split(' ')[0] ?? null,
+          lastName: row.contactName?.split(' ').slice(1).join(' ') ?? null,
+          title: row.contactTitle ?? null,
+          workEmail: row.contactEmail ?? null,
+        } as ListMember['contact']
+      : undefined,
+  }));
 }

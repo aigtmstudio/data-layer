@@ -112,11 +112,12 @@ export function scoreCompanyFit(company: UnifiedCompany, filters: IcpFilters): S
     }
   }
 
-  const finalScore = totalWeight > 0 ? totalScore / totalWeight : 0;
+  // If no filters are configured, give a neutral score (companies matched search criteria)
+  const finalScore = totalWeight > 0 ? totalScore / totalWeight : 0.75;
 
   return {
     score: Math.round(finalScore * 100) / 100,
     breakdown,
-    reasons,
+    reasons: totalWeight === 0 ? ['No ICP filters configured — default score'] : reasons,
   };
 }

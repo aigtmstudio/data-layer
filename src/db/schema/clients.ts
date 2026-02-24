@@ -22,7 +22,7 @@ export const clients = pgTable('clients', {
 
   creditBalance: numeric('credit_balance', { precision: 12, scale: 4 })
     .notNull()
-    .default('0'),
+    .default('1000'),
   creditMarginPercent: numeric('credit_margin_percent', { precision: 5, scale: 2 })
     .notNull()
     .default('30'),

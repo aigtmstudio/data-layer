@@ -1,7 +1,7 @@
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, or, gte, lte, inArray, ilike, sql, isNull } from 'drizzle-orm';
+import { eq, and, or, inArray, ilike, isNull } from 'drizzle-orm';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
-import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
+import type { IcpFilters } from '../../db/schema/icps.js';
 import type { UnifiedCompany } from '../../providers/types.js';
 import type { CompanyDiscoveryService } from '../company-discovery/index.js';
 import { NotFoundError } from '../../lib/errors.js';
@@ -29,42 +29,20 @@ export class ListBuilder {
     if (!icp) throw new NotFoundError('ICP', params.icpId);
 
     const filters = icp.filters as IcpFilters;
-    const providerHints = (icp.providerHints as ProviderSearchHints | null) ?? filters.providerHints;
 
-    // Build company query
-    const conditions = [eq(schema.companies.clientId, params.clientId)];
-
-    if (filters.industries?.length) {
-      conditions.push(
-        or(...filters.industries.map(i => ilike(schema.companies.industry, `%${i}%`)))!,
-      );
-    }
-    if (filters.employeeCountMin != null) {
-      conditions.push(gte(schema.companies.employeeCount, filters.employeeCountMin));
-    }
-    if (filters.employeeCountMax != null) {
-      conditions.push(lte(schema.companies.employeeCount, filters.employeeCountMax));
-    }
-    if (filters.countries?.length) {
-      conditions.push(inArray(schema.companies.country, filters.countries));
-    }
-    // Use provider hints keyword terms for additional matching
-    if (providerHints?.keywordSearchTerms?.length) {
-      conditions.push(
-        or(...providerHints.keywordSearchTerms.map(term =>
-          or(
-            ilike(schema.companies.name, `%${term}%`),
-            ilike(schema.companies.industry, `%${term}%`),
-          )!,
-        ))!,
-      );
-    }
-
+    // Fetch all companies for this client — the ICP scorer handles filtering
+    // with fuzzy/partial matching that's more accurate than SQL exact-match conditions.
+    // SQL filters caused false negatives (e.g. country "US" != "United States").
     const matchingCompanies = await db
       .select()
       .from(schema.companies)
-      .where(and(...conditions))
-      .limit(params.limit ?? 1000);
+      .where(eq(schema.companies.clientId, params.clientId))
+      .limit((params.limit ?? 1000) * 3); // Over-fetch so scorer has enough to filter
+
+    logger.info(
+      { listId: params.listId, candidateCount: matchingCompanies.length },
+      'Companies loaded from DB for scoring',
+    );
 
     // Score each company
     const scored = matchingCompanies
@@ -85,7 +63,7 @@ export class ListBuilder {
         const scoreResult = scoreCompanyFit(companyData, filters);
         return { company: c, ...scoreResult };
       })
-      .filter(c => c.score >= 0.5)
+      .filter(c => c.score >= 0.2)
       .sort((a, b) => b.score - a.score);
 
     // Load persona if provided

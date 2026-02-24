@@ -7,6 +7,7 @@ export const JOB_TYPES = {
   LIST_REFRESH: 'list-refresh',
   ENRICHMENT: 'enrichment',
   EXPORT: 'export',
+  MARKET_SIGNAL_PROCESSING: 'market-signal-processing',
 } as const;
 
 export class Scheduler {
@@ -27,6 +28,7 @@ export class Scheduler {
     onListRefresh: (data: { listId: string; clientId: string }) => Promise<void>;
     onEnrichment: (data: { clientId: string; domains: string[]; jobId: string; options?: Record<string, unknown> }) => Promise<void>;
     onExport: (data: { clientId: string; listId: string; format: string; destination?: Record<string, unknown> }) => Promise<void>;
+    onMarketSignalProcessing?: (data: { clientId?: string; batchSize?: number }) => Promise<void>;
   }): Promise<void> {
     await this.boss.start();
 
@@ -50,6 +52,25 @@ export class Scheduler {
         await handlers.onExport(job.data as { clientId: string; listId: string; format: string; destination?: Record<string, unknown> });
       }
     });
+
+    // Market signal processing handler + schedule
+    if (handlers.onMarketSignalProcessing) {
+      await this.boss.createQueue(JOB_TYPES.MARKET_SIGNAL_PROCESSING);
+      await this.boss.work(JOB_TYPES.MARKET_SIGNAL_PROCESSING, async (jobs: PgBoss.Job[]) => {
+        for (const job of jobs) {
+          logger.info({ jobId: job.id }, 'Processing market signals');
+          await handlers.onMarketSignalProcessing!(job.data as { clientId?: string; batchSize?: number });
+        }
+      });
+
+      // Schedule every 15 minutes — schedule name must match the queue name
+      await this.boss.schedule(
+        JOB_TYPES.MARKET_SIGNAL_PROCESSING,
+        '*/15 * * * *',
+        { batchSize: 50 },
+      );
+      logger.info('Market signal processing scheduled every 15 minutes');
+    }
 
     await this.registerListRefreshSchedules();
     logger.info('Scheduler started');

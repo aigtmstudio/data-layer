@@ -92,7 +92,11 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
         qualityScore: 0.5,
       };
     } catch (error) {
-      this.log.error({ error }, 'Company search failed');
+      if (this.isPlanRestriction(error)) {
+        this.log.warn('Company search requires a paid Apollo plan — skipping');
+      } else {
+        this.log.error({ error }, 'Company search failed');
+      }
       return {
         success: false, data: [], totalResults: 0, hasMore: false,
         error: String(error), creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
@@ -164,7 +168,11 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
         qualityScore: 0.6,
       };
     } catch (error) {
-      this.log.error({ error }, 'People search failed');
+      if (this.isPlanRestriction(error)) {
+        this.log.warn('People search requires a paid Apollo plan — skipping');
+      } else {
+        this.log.error({ error }, 'People search failed');
+      }
       return {
         success: false, data: [], totalResults: 0, hasMore: false,
         error: String(error), creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
@@ -209,5 +217,10 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
         creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
       };
     }
+  }
+
+  private isPlanRestriction(error: unknown): boolean {
+    const msg = error instanceof Error ? error.message : String(error);
+    return msg.includes('403') || msg.includes('API_INACCESSIBLE') || msg.includes('free plan');
   }
 }

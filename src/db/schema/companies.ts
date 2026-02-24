@@ -1,5 +1,6 @@
 import { pgTable, uuid, text, timestamp, jsonb, integer, numeric, index } from 'drizzle-orm/pg-core';
 import { clients } from './clients.js';
+import { pipelineStageEnum } from './enums.js';
 
 export interface SourceRecord {
   source: string;
@@ -49,6 +50,9 @@ export const companies = pgTable('companies', {
 
   originalityScore: numeric('originality_score', { precision: 3, scale: 2 }),
   sourceRarityScores: jsonb('source_rarity_scores').$type<Record<string, number>>(),
+
+  pipelineStage: pipelineStageEnum('pipeline_stage').notNull().default('tam'),
+  signalScore: numeric('signal_score', { precision: 3, scale: 2 }),
 
   lastEnrichedAt: timestamp('last_enriched_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

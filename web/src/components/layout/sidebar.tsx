@@ -11,12 +11,14 @@ import {
   Zap,
   Activity,
   Settings,
+  Radio,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/clients', label: 'Clients', icon: Users },
   { href: '/lists', label: 'Lists', icon: List },
+  { href: '/signals', label: 'Signals', icon: Radio },
   { href: '/enrichment', label: 'Enrichment', icon: Zap },
   { href: '/jobs', label: 'Jobs', icon: Activity },
   { href: '/settings', label: 'Settings', icon: Settings },

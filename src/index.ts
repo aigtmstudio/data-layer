@@ -17,6 +17,8 @@ import {
   IntelligenceScorer,
   StrategyGenerator,
   DynamicOrchestrator,
+  HypothesisGenerator,
+  MarketSignalProcessor,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -50,6 +52,9 @@ export interface ServiceContainer {
   intelligenceScorer: IntelligenceScorer;
   strategyGenerator: StrategyGenerator;
   dynamicOrchestrator: DynamicOrchestrator;
+  // Signal pipeline
+  hypothesisGenerator: HypothesisGenerator;
+  marketSignalProcessor: MarketSignalProcessor;
 }
 
 let container: ServiceContainer;
@@ -84,7 +89,7 @@ async function main() {
   if (config.scrapegraphApiKey) orchestrator.registerProvider(new ScrapeGraphProvider(config.scrapegraphApiKey), 13);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
-  const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline);
+  const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline, config.anthropicApiKey);
   const listBuilder = new ListBuilder();
   listBuilder.setDiscoveryService(discoveryService);
   const exportEngine = new ExportEngine();
@@ -105,6 +110,10 @@ async function main() {
     orchestrator, strategyGenerator, signalDetector, intelligenceScorer, clientProfileService,
   );
 
+  // Signal pipeline
+  const hypothesisGenerator = new HypothesisGenerator(config.anthropicApiKey, clientProfileService);
+  const marketSignalProcessor = new MarketSignalProcessor(config.anthropicApiKey);
+
   // 3. Store in container
   container = {
     creditManager,
@@ -121,6 +130,8 @@ async function main() {
     intelligenceScorer,
     strategyGenerator,
     dynamicOrchestrator,
+    hypothesisGenerator,
+    marketSignalProcessor,
   };
 
   // 4. Start scheduler with handlers
@@ -138,6 +149,9 @@ async function main() {
     },
     onExport: async (data) => {
       await exportEngine.export(data.clientId, data.listId, data.format, data.destination);
+    },
+    onMarketSignalProcessing: async (data) => {
+      await marketSignalProcessor.processUnclassifiedSignals(data.clientId, data.batchSize);
     },
   });
 

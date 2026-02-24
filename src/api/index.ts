@@ -12,6 +12,8 @@ import { creditRoutes } from './routes/credits.js';
 import { jobRoutes } from './routes/jobs.js';
 import { exportRoutes } from './routes/exports.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
+import { hypothesisRoutes } from './routes/hypotheses.js';
+import { marketSignalRoutes } from './routes/market-signals.js';
 import type { ServiceContainer } from '../index.js';
 
 export async function buildApp(apiKey: string, container: ServiceContainer) {
@@ -35,6 +37,8 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   await app.register(jobRoutes, { prefix: '/api/jobs' });
   await app.register(exportRoutes, { prefix: '/api/exports', container });
   await app.register(intelligenceRoutes, { prefix: '/api/intelligence', container });
+  await app.register(hypothesisRoutes, { prefix: '/api/hypotheses', container });
+  await app.register(marketSignalRoutes, { prefix: '/api/market-signals', container });
 
   // Health check
   app.get('/health', async () => ({

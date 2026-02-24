@@ -1,3 +1,4 @@
+import Anthropic from '@anthropic-ai/sdk';
 import type { SourceOrchestrator } from '../source-orchestrator/index.js';
 import type { EnrichmentPipeline } from '../enrichment/index.js';
 import type { CompanySearchParams, UnifiedCompany } from '../../providers/types.js';
@@ -17,10 +18,15 @@ export interface DiscoveryResult {
 }
 
 export class CompanyDiscoveryService {
+  private anthropic: Anthropic;
+
   constructor(
     private orchestrator: SourceOrchestrator,
     private enrichment: EnrichmentPipeline,
-  ) {}
+    anthropicApiKey: string,
+  ) {
+    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  }
 
   async discoverAndPopulate(params: {
     clientId: string;
@@ -62,11 +68,49 @@ export class CompanyDiscoveryService {
     const { result: discovered, providersUsed, totalCost } =
       await this.orchestrator.searchCompanies(params.clientId, searchParams);
 
-    const companies = discovered ?? [];
+    let companies = discovered ?? [];
     logger.info(
-      { count: companies.length, providersUsed },
+      { count: companies.length, providersUsed, totalCost },
       'Companies discovered from providers',
     );
+
+    // 3b. Fallback: if no search providers returned results, use AI to suggest companies
+    // then enrich via Apollo to get real data
+    if (companies.length === 0) {
+      logger.info('No search providers available, falling back to AI-powered discovery');
+      if (params.jobId) {
+        await db
+          .update(schema.jobs)
+          .set({ output: { phase: 'ai_discovery' }, updatedAt: new Date() })
+          .where(eq(schema.jobs.id, params.jobId));
+      }
+
+      const aiCompanies = await this.discoverViaAI(filters, providerHints, limit);
+      if (aiCompanies.length > 0) {
+        // Enrich each AI-suggested company via Apollo to get real data
+        const enriched: UnifiedCompany[] = [];
+        for (const suggestion of aiCompanies) {
+          if (!suggestion.domain) continue;
+          try {
+            const { result } = await this.orchestrator.enrichCompany(
+              params.clientId,
+              { domain: suggestion.domain, name: suggestion.name },
+            );
+            if (result) {
+              enriched.push(result);
+            }
+          } catch (err) {
+            logger.debug({ domain: suggestion.domain, error: err }, 'Failed to enrich AI-suggested company');
+          }
+        }
+        companies = enriched;
+        if (!providersUsed.includes('ai_discovery')) providersUsed.push('ai_discovery');
+        logger.info(
+          { suggested: aiCompanies.length, enriched: enriched.length },
+          'AI discovery + enrichment complete',
+        );
+      }
+    }
 
     if (companies.length === 0) {
       if (params.jobId) {
@@ -135,13 +179,10 @@ export class CompanyDiscoveryService {
     }
 
     // 6. Score all discovered companies (new + existing)
-    const allDiscoveredDomains = companies
-      .map(c => c.domain?.toLowerCase())
-      .filter(Boolean) as string[];
-
+    // Note: these companies already matched provider search criteria so we use a low threshold
     const scoredCompanies = companies
       .map(c => ({ company: c, ...scoreCompanyFit(c, filters) }))
-      .filter(c => c.score >= 0.3) // Lower threshold for discovered companies — they already matched search
+      .filter(c => c.score >= 0.2) // Low threshold — companies already matched provider search filters
       .sort((a, b) => b.score - a.score)
       .slice(0, limit);
 
@@ -243,6 +284,68 @@ export class CompanyDiscoveryService {
     if (keywords.length) params.keywords = [...new Set(keywords)];
 
     return params;
+  }
+
+  private async discoverViaAI(
+    filters: IcpFilters,
+    hints: ProviderSearchHints | undefined,
+    limit: number,
+  ): Promise<Array<{ name: string; domain: string }>> {
+    const filterDesc: string[] = [];
+    if (filters.industries?.length) filterDesc.push(`Industries: ${filters.industries.join(', ')}`);
+    if (filters.employeeCountMin || filters.employeeCountMax)
+      filterDesc.push(`Employees: ${filters.employeeCountMin ?? 'any'}-${filters.employeeCountMax ?? 'any'}`);
+    if (filters.revenueMin || filters.revenueMax)
+      filterDesc.push(`Revenue: $${filters.revenueMin ?? 0}-$${filters.revenueMax ?? 'any'}`);
+    if (filters.countries?.length) filterDesc.push(`Countries: ${filters.countries.join(', ')}`);
+    if (filters.states?.length) filterDesc.push(`States: ${filters.states.join(', ')}`);
+    if (filters.cities?.length) filterDesc.push(`Cities: ${filters.cities.join(', ')}`);
+    if (filters.techStack?.length) filterDesc.push(`Tech stack: ${filters.techStack.join(', ')}`);
+    if (filters.fundingStages?.length) filterDesc.push(`Funding stages: ${filters.fundingStages.join(', ')}`);
+    if (filters.keywords?.length) filterDesc.push(`Keywords: ${filters.keywords.join(', ')}`);
+    if (hints?.keywordSearchTerms?.length) filterDesc.push(`Search terms: ${hints.keywordSearchTerms.join(', ')}`);
+
+    const prompt = `List ${Math.min(limit, 50)} real companies that match this ideal customer profile. Only include companies you are confident actually exist.
+
+Filters:
+${filterDesc.join('\n')}
+
+Return ONLY a JSON array of objects with "name" and "domain" fields. Example:
+[{"name": "Pfizer", "domain": "pfizer.com"}, {"name": "Johnson & Johnson", "domain": "jnj.com"}]
+
+Rules:
+- Only real, currently operating companies
+- Include the company's primary website domain (not linkedin or wikipedia)
+- Focus on well-known companies that clearly match the criteria
+- No duplicates`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4096,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map(b => b.text)
+        .join('');
+
+      // Extract JSON array from response
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) {
+        logger.warn('AI discovery returned no parseable JSON');
+        return [];
+      }
+
+      const parsed = JSON.parse(jsonMatch[0]) as Array<{ name: string; domain: string }>;
+      const valid = parsed.filter(c => c.name && c.domain);
+      logger.info({ count: valid.length }, 'AI suggested companies');
+      return valid;
+    } catch (error) {
+      logger.error({ error }, 'AI discovery failed');
+      return [];
+    }
   }
 
   private async upsertDiscoveredCompany(

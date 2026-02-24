@@ -11,3 +11,7 @@ export { ProviderPerformanceTracker } from './provider-performance-tracker.js';
 export type { PerformanceRecord, ProviderStats } from './provider-performance-tracker.js';
 export { PROVIDER_PROFILES, SIGNAL_DEFINITIONS, getProviderOriginalityWeight, rankProvidersForContext } from './provider-knowledge.js';
 export type { ProviderProfile } from './provider-knowledge.js';
+export { HypothesisGenerator } from './hypothesis-generator.js';
+export type { HypothesisFilters, CreateHypothesisInput, UpdateHypothesisInput } from './hypothesis-generator.js';
+export { MarketSignalProcessor } from './market-signal-processor.js';
+export type { IngestSignalInput, SignalFeedOptions } from './market-signal-processor.js';

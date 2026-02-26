@@ -5,6 +5,7 @@ import type { UnifiedCompany } from '../../providers/types.js';
 import type { SignalData } from '../../db/schema/intelligence.js';
 import { SIGNAL_DEFINITIONS } from './provider-knowledge.js';
 import { logger } from '../../lib/logger.js';
+import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
 export interface DetectedSignal {
   signalType: string;
@@ -14,7 +15,7 @@ export interface DetectedSignal {
   details?: Record<string, unknown>;
 }
 
-const LLM_SIGNAL_PROMPT = `Analyze this company data and detect buying signals that suggest the company may need or be ready to purchase B2B services.
+export const LLM_SIGNAL_PROMPT = `Analyze this company data and detect buying signals that suggest the company may need or be ready to purchase B2B services.
 
 For each signal detected, return JSON array:
 [{
@@ -25,11 +26,26 @@ For each signal detected, return JSON array:
 
 Only include signals with signalStrength >= 0.5. Return empty array [] if no strong signals detected. Return ONLY valid JSON.`;
 
+registerPrompt({
+  key: 'signal.company.detection.system',
+  label: 'Company Signal Detection',
+  area: 'Signal Detection',
+  promptType: 'system',
+  model: 'claude-haiku-4-5-20251001',
+  description: 'System prompt for detecting buying signals from company data',
+  defaultContent: LLM_SIGNAL_PROMPT,
+});
+
 export class SignalDetector {
   private anthropic: Anthropic;
+  private promptConfig?: PromptConfigService;
 
   constructor(anthropicApiKey: string) {
     this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  }
+
+  setPromptConfig(promptConfig: PromptConfigService) {
+    this.promptConfig = promptConfig;
   }
 
   /**
@@ -156,10 +172,15 @@ export class SignalDetector {
           : null,
       ].filter(Boolean).join('\n');
 
+      let signalPrompt = LLM_SIGNAL_PROMPT;
+      if (this.promptConfig) {
+        try { signalPrompt = await this.promptConfig.getPrompt('signal.company.detection.system'); } catch { /* use default */ }
+      }
+
       const message = await this.anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 512,
-        system: LLM_SIGNAL_PROMPT,
+        system: signalPrompt,
         messages: [{ role: 'user', content: companyInfo }],
       });
 

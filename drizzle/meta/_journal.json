@@ -15,6 +15,20 @@
       "when": 1771944407828,
       "tag": "0001_pale_nuke",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1771972358015,
+      "tag": "0002_living_vivisector",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1772008034145,
+      "tag": "0003_wide_stone_men",
+      "breakpoints": true
     }
   ]
 }

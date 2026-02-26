@@ -319,6 +319,7 @@ export const icpRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = as
         const [persona] = await db
           .insert(schema.personas)
           .values({
+            clientId: request.params.clientId,
             icpId: request.params.id,
             name: result.suggestedPersona.name,
             description: result.suggestedPersona.reasoning,
@@ -457,6 +458,7 @@ export const icpRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = as
       const [persona] = await db
         .insert(schema.personas)
         .values({
+          clientId: request.params.clientId,
           icpId: icp.id,
           name: result.suggestedPersona.name,
           description: result.suggestedPersona.reasoning,

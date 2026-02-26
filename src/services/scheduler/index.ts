@@ -63,13 +63,13 @@ export class Scheduler {
         }
       });
 
-      // Schedule every 15 minutes — schedule name must match the queue name
+      // Schedule weekly (Sunday 2am) — on-demand processing via API remains available
       await this.boss.schedule(
         JOB_TYPES.MARKET_SIGNAL_PROCESSING,
-        '*/15 * * * *',
+        '0 2 * * 0',
         { batchSize: 50 },
       );
-      logger.info('Market signal processing scheduled every 15 minutes');
+      logger.info('Market signal processing scheduled weekly (Sunday 2am)');
     }
 
     await this.registerListRefreshSchedules();

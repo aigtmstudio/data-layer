@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as listsApi from '../api/lists';
+import type { PipelineStage } from '../types';
 
 export const listKeys = {
   all: (clientId?: string) => clientId ? ['lists', clientId] as const : ['lists'] as const,
   detail: (id: string) => ['lists', 'detail', id] as const,
   members: (id: string) => ['lists', 'members', id] as const,
+  funnel: (id: string) => ['lists', 'funnel', id] as const,
   buildStatus: (id: string) => ['lists', 'build-status', id] as const,
 };
 
@@ -25,10 +27,19 @@ export function useList(id: string | null) {
   });
 }
 
-export function useListMembers(id: string | null, params?: { limit?: number; offset?: number }) {
+export function useListMembers(id: string | null, params?: { limit?: number; offset?: number; stage?: PipelineStage }) {
   return useQuery({
     queryKey: [...listKeys.members(id!), params],
     queryFn: () => listsApi.getListMembers(id!, params),
+    enabled: !!id,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useFunnelStats(id: string | null) {
+  return useQuery({
+    queryKey: listKeys.funnel(id!),
+    queryFn: () => listsApi.getFunnelStats(id!),
     enabled: !!id,
     staleTime: 30 * 1000,
   });
@@ -88,6 +99,43 @@ export function useUpdateListSchedule() {
     onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: ['lists'] });
       qc.invalidateQueries({ queryKey: listKeys.detail(id) });
+    },
+  });
+}
+
+export function useRunCompanySignals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: listsApi.runCompanySignals,
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.funnel(listId) });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
+  });
+}
+
+export function useBuildContacts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { personaId: string; name?: string } }) =>
+      listsApi.buildContacts(id, data),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}
+
+export function useRunPersonaSignals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: listsApi.runPersonaSignals,
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
     },
   });
 }

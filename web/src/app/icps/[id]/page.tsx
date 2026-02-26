@@ -1,9 +1,8 @@
 'use client';
 
 import { use, useState, useRef } from 'react';
-import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useIcp, useUpdateIcp, useParseIcp, useSources, useUploadDocument, useAddTranscript, useUploadCrmCsv, useClearSources, useParseSources } from '@/lib/hooks/use-icps';
+import { useIcpById, useUpdateIcp, useParseIcp, useSources, useUploadDocument, useAddTranscript, useUploadCrmCsv, useClearSources, useParseSources } from '@/lib/hooks/use-icps';
 import { usePersonas, useCreatePersona, useDeletePersona } from '@/lib/hooks/use-personas';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,7 +10,6 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TagInput } from '@/components/shared/tag-input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -22,12 +20,11 @@ import type { IcpFilters } from '@/lib/types';
 
 export default function IcpBuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id: icpId } = use(params);
-  const searchParams = useSearchParams();
-  const clientId = searchParams.get('clientId');
 
-  const { data: icp, isLoading, isError, refetch } = useIcp(clientId, icpId);
-  const { data: personas } = usePersonas(clientId, icpId);
-  const { data: pendingSources, refetch: refetchSources } = useSources(clientId, icpId);
+  const { data: icp, isLoading, isError, refetch } = useIcpById(icpId);
+  const resolvedClientId = icp?.clientId ?? null;
+  const { data: personas } = usePersonas(resolvedClientId, icpId);
+  const { data: pendingSources, refetch: refetchSources } = useSources(resolvedClientId, icpId);
   const updateIcp = useUpdateIcp();
   const parseIcp = useParseIcp();
   const createPersona = useCreatePersona();
@@ -59,13 +56,16 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
     setInitialized(true);
   }
 
-  if (isLoading || !clientId) {
+  if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
   }
 
   if (isError || !icp) {
     return <ErrorBanner title="ICP not found" description="Could not load ICP data. The API may be unavailable." retry={() => refetch()} />;
   }
+
+  // clientId is guaranteed to exist after the icp guard above
+  const clientId = icp.clientId;
 
   const handleParse = async () => {
     if (!nlInput.trim()) return;
@@ -519,6 +519,44 @@ export default function IcpBuilderPage({ params }: { params: Promise<{ id: strin
                     onChange={(v) => updateFilter('keywords', v)}
                     placeholder="e.g. AI, machine learning"
                   />
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Exclusion Filters */}
+            <Card className="lg:col-span-2">
+              <CardHeader>
+                <CardTitle className="text-base">Exclusion Filters</CardTitle>
+                <p className="text-sm text-muted-foreground">
+                  Companies matching these criteria will be excluded from discovery results with a score of 0.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 lg:grid-cols-3">
+                  <div className="space-y-2">
+                    <Label>Exclude Industries</Label>
+                    <TagInput
+                      value={filters.excludeIndustries || []}
+                      onChange={(v) => updateFilter('excludeIndustries', v)}
+                      placeholder="e.g. Real Estate, Education"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Exclude Keywords</Label>
+                    <TagInput
+                      value={filters.excludeKeywords || []}
+                      onChange={(v) => updateFilter('excludeKeywords', v)}
+                      placeholder="e.g. nonprofit, government"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Exclude Domains</Label>
+                    <TagInput
+                      value={filters.excludeDomains || []}
+                      onChange={(v) => updateFilter('excludeDomains', v)}
+                      placeholder="e.g. competitor.com"
+                    />
+                  </div>
                 </div>
               </CardContent>
             </Card>

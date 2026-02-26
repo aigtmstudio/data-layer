@@ -42,6 +42,8 @@ export interface IcpFilters {
   states?: string[];
   cities?: string[];
   excludeCountries?: string[];
+  excludeIndustries?: string[];
+  excludeKeywords?: string[];
   techStack?: string[];
   techCategories?: string[];
   signals?: string[];
@@ -114,6 +116,7 @@ export interface ParseSourcesResponse {
 
 export interface Persona {
   id: string;
+  clientId: string;
   icpId: string;
   name: string;
   description: string | null;
@@ -191,7 +194,10 @@ export type JobType =
   | 'export'
   | 'full_enrichment_pipeline'
   | 'signal_hypothesis_generation'
-  | 'market_signal_processing';
+  | 'market_signal_processing'
+  | 'company_signals'
+  | 'contact_list_build'
+  | 'persona_signal_detection';
 
 export interface Job {
   id: string;
@@ -252,6 +258,7 @@ export interface List {
   memberCount: number;
   companyCount: number;
   contactCount: number;
+  sourceCompanyListId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -269,11 +276,27 @@ export interface ListMember {
   companyId: string | null;
   contactId: string | null;
   icpFitScore: string | null;
+  signalScore: string | null;
+  intelligenceScore: string | null;
+  personaScore: string | null;
   addedReason: string | null;
   addedAt: string;
   removedAt: string | null;
   company?: Company;
   contact?: Contact;
+  // Flattened fields from API join
+  companyName?: string | null;
+  companyDomain?: string | null;
+  companyIndustry?: string | null;
+  pipelineStage?: PipelineStage | null;
+  contactName?: string | null;
+  contactTitle?: string | null;
+  contactEmail?: string | null;
+}
+
+export interface FunnelStats {
+  stages: Record<string, number>;
+  total: number;
 }
 
 export type ExportFormat = 'csv' | 'excel' | 'google_sheets' | 'salesforce' | 'hubspot';
@@ -287,15 +310,29 @@ export interface ExportRequest {
 
 // Signal Pipeline types
 
-export type SignalCategory = 'regulatory' | 'economic' | 'technology' | 'competitive';
+export type SignalLevel = 'market' | 'company' | 'persona';
+export type SignalCategory =
+  // Market
+  | 'regulatory' | 'economic' | 'industry' | 'competitive'
+  // Company
+  | 'funding' | 'hiring' | 'tech_adoption' | 'expansion' | 'leadership' | 'product_launch'
+  // Persona
+  | 'job_change' | 'title_match' | 'seniority_match' | 'tenure_signal';
 export type HypothesisStatus = 'active' | 'paused' | 'retired';
 export type HypothesisValidation = 'llm_generated' | 'human_validated' | 'human_created';
+
+export const SIGNAL_CATEGORIES_BY_LEVEL: Record<SignalLevel, SignalCategory[]> = {
+  market: ['regulatory', 'economic', 'industry', 'competitive'],
+  company: ['funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch'],
+  persona: ['job_change', 'title_match', 'seniority_match', 'tenure_signal'],
+};
 
 export interface SignalHypothesis {
   id: string;
   clientId: string;
   icpId: string | null;
   hypothesis: string;
+  signalLevel: SignalLevel;
   signalCategory: SignalCategory;
   monitoringSources: string[];
   affectedSegments: string[];
@@ -305,6 +342,18 @@ export interface SignalHypothesis {
   metadata: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ContactSignal {
+  id: string;
+  contactId: string;
+  clientId: string;
+  signalType: string;
+  signalStrength: string;
+  signalData: Record<string, unknown>;
+  source: string;
+  detectedAt: string;
+  expiresAt: string;
 }
 
 export interface MarketSignal {
@@ -323,6 +372,20 @@ export interface MarketSignal {
   detectedAt: string | null;
   processedAt: string | null;
   createdAt: string;
+}
+
+// Prompt configuration
+export interface PromptConfig {
+  key: string;
+  label: string;
+  area: string;
+  promptType: 'system' | 'user';
+  model: string;
+  description: string;
+  defaultContent: string;
+  currentContent: string;
+  isCustomised: boolean;
+  updatedAt: string | null;
 }
 
 // API response wrapper

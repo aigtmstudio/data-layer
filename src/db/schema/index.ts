@@ -11,3 +11,5 @@ export * from './data-sources.js';
 export * from './intelligence.js';
 export * from './signal-hypotheses.js';
 export * from './market-signals.js';
+export * from './contact-signals.js';
+export * from './prompt-configs.js';

@@ -77,6 +77,7 @@ export type ProviderCapability =
   | 'email_verify';
 
 export interface CompanySearchParams {
+  query?: string; // Semantic search query — used directly by providers like Exa
   industries?: string[];
   employeeCountMin?: number;
   employeeCountMax?: number;

@@ -5,6 +5,7 @@ import { authPlugin } from './plugins/auth.js';
 import { errorHandlerPlugin } from './plugins/error-handler.js';
 import { clientRoutes } from './routes/clients.js';
 import { icpRoutes } from './routes/icps.js';
+import { icpDirectRoutes } from './routes/icps-direct.js';
 import { personaRoutes } from './routes/personas.js';
 import { listRoutes } from './routes/lists.js';
 import { enrichmentRoutes } from './routes/enrichment.js';
@@ -14,6 +15,8 @@ import { exportRoutes } from './routes/exports.js';
 import { intelligenceRoutes } from './routes/intelligence.js';
 import { hypothesisRoutes } from './routes/hypotheses.js';
 import { marketSignalRoutes } from './routes/market-signals.js';
+import { personaV2Routes } from './routes/personas-v2.js';
+import { settingsRoutes } from './routes/settings.js';
 import type { ServiceContainer } from '../index.js';
 
 export async function buildApp(apiKey: string, container: ServiceContainer) {
@@ -39,6 +42,9 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   await app.register(intelligenceRoutes, { prefix: '/api/intelligence', container });
   await app.register(hypothesisRoutes, { prefix: '/api/hypotheses', container });
   await app.register(marketSignalRoutes, { prefix: '/api/market-signals', container });
+  await app.register(icpDirectRoutes, { prefix: '/api/icps', container });
+  await app.register(personaV2Routes, { prefix: '/api/personas', container });
+  await app.register(settingsRoutes, { prefix: '/api/settings', container });
 
   // Health check
   app.get('/health', async () => ({

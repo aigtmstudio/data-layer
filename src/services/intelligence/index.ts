@@ -15,3 +15,5 @@ export { HypothesisGenerator } from './hypothesis-generator.js';
 export type { HypothesisFilters, CreateHypothesisInput, UpdateHypothesisInput } from './hypothesis-generator.js';
 export { MarketSignalProcessor } from './market-signal-processor.js';
 export type { IngestSignalInput, SignalFeedOptions } from './market-signal-processor.js';
+export { PersonaSignalDetector } from './persona-signal-detector.js';
+export type { PersonaSignalResult } from './persona-signal-detector.js';

@@ -52,18 +52,17 @@ export default function ListsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [newIcpId, setNewIcpId] = useState('');
-  const [newType, setNewType] = useState<'company' | 'contact' | 'mixed'>('contact');
   const [buildingListId, setBuildingListId] = useState<string | null>(null);
   const { data: buildJob } = useBuildStatus(buildingListId);
 
   const handleCreate = async () => {
-    if (!newName.trim() || !selectedClientId) return;
+    if (!newName.trim() || !selectedClientId || !newIcpId) return;
     try {
       await createList.mutateAsync({
         clientId: selectedClientId,
         name: newName,
-        icpId: newIcpId || undefined,
-        type: newType,
+        icpId: newIcpId,
+        type: 'company',
       });
       setCreateOpen(false);
       setNewName('');
@@ -129,7 +128,11 @@ export default function ListsPage() {
         {row.original.name}
       </Link>
     )},
-    { accessorKey: 'type', header: 'Type', cell: ({ row }) => <Badge variant="outline">{row.original.type}</Badge> },
+    { accessorKey: 'type', header: 'Type', cell: ({ row }) => (
+      <Badge variant="outline" className={row.original.type === 'contact' ? 'bg-purple-50 text-purple-700 border-purple-300' : ''}>
+        {row.original.type}
+      </Badge>
+    )},
     { accessorKey: 'memberCount', header: 'Members', cell: ({ row }) => (
       buildingListId === row.original.id ? (
         <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -240,20 +243,7 @@ export default function ListsPage() {
               />
             </div>
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={newType} onValueChange={(v) => setNewType(v as typeof newType)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="contact">Contact</SelectItem>
-                  <SelectItem value="company">Company</SelectItem>
-                  <SelectItem value="mixed">Mixed</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>ICP (optional)</Label>
+              <Label>ICP</Label>
               <Select value={newIcpId} onValueChange={setNewIcpId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select an ICP" />
@@ -269,7 +259,7 @@ export default function ListsPage() {
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-              <Button onClick={handleCreate} disabled={createList.isPending}>
+              <Button onClick={handleCreate} disabled={!newName.trim() || !newIcpId || createList.isPending}>
                 {createList.isPending ? 'Creating...' : 'Create List'}
               </Button>
             </div>

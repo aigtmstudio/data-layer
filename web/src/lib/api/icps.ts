@@ -11,6 +11,11 @@ export async function getIcp(clientId: string, icpId: string): Promise<Icp> {
   return res.data;
 }
 
+export async function getIcpById(icpId: string): Promise<Icp> {
+  const res = await apiClient.get<ApiResponse<Icp>>(`/api/icps/${icpId}`);
+  return res.data;
+}
+
 export async function createIcp(
   clientId: string,
   data: {

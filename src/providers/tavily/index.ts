@@ -153,6 +153,9 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
 }
 
 function buildSearchQuery(params: CompanySearchParams): string {
+  // Prefer the pre-built semantic query when available
+  if (params.query) return params.query;
+
   const parts: string[] = [];
 
   if (params.keywords?.length) {

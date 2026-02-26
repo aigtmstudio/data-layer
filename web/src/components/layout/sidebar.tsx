@@ -7,6 +7,8 @@ import {
   LayoutDashboard,
   Users,
   Target,
+  Crosshair,
+  UserCircle,
   List,
   Zap,
   Activity,
@@ -17,6 +19,8 @@ import {
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/clients', label: 'Clients', icon: Users },
+  { href: '/icps', label: 'ICPs', icon: Crosshair },
+  { href: '/personas', label: 'Personas', icon: UserCircle },
   { href: '/lists', label: 'Lists', icon: List },
   { href: '/signals', label: 'Signals', icon: Radio },
   { href: '/enrichment', label: 'Enrichment', icon: Zap },

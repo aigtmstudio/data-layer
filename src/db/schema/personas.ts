@@ -1,8 +1,10 @@
-import { pgTable, uuid, text, timestamp, jsonb, integer, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, integer, boolean, index } from 'drizzle-orm/pg-core';
+import { clients } from './clients.js';
 import { icps } from './icps.js';
 
 export const personas = pgTable('personas', {
   id: uuid('id').primaryKey().defaultRandom(),
+  clientId: uuid('client_id').notNull().references(() => clients.id, { onDelete: 'cascade' }),
   icpId: uuid('icp_id').notNull().references(() => icps.id, { onDelete: 'cascade' }),
 
   name: text('name').notNull(),
@@ -25,4 +27,7 @@ export const personas = pgTable('personas', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
-});
+}, (table) => [
+  index('idx_personas_client').on(table.clientId),
+  index('idx_personas_icp').on(table.icpId),
+]);

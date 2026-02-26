@@ -1,5 +1,5 @@
 import { apiClient } from '../api-client';
-import type { List, ListMember, ListType, Job, ApiResponse } from '../types';
+import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage } from '../types';
 
 export async function getLists(clientId?: string): Promise<List[]> {
   const query = clientId ? `?clientId=${clientId}` : '';
@@ -52,10 +52,15 @@ interface RawListMember {
   companyId: string | null;
   contactId: string | null;
   icpFitScore: string | null;
+  signalScore: string | null;
+  intelligenceScore: string | null;
+  personaScore: string | null;
   addedReason: string | null;
   addedAt: string;
   companyName: string | null;
   companyDomain: string | null;
+  companyIndustry: string | null;
+  pipelineStage: PipelineStage | null;
   contactName: string | null;
   contactTitle: string | null;
   contactEmail: string | null;
@@ -63,11 +68,12 @@ interface RawListMember {
 
 export async function getListMembers(
   id: string,
-  params?: { limit?: number; offset?: number },
+  params?: { limit?: number; offset?: number; stage?: PipelineStage },
 ): Promise<ListMember[]> {
   const query = new URLSearchParams();
   if (params?.limit) query.set('limit', String(params.limit));
   if (params?.offset) query.set('offset', String(params.offset));
+  if (params?.stage) query.set('stage', params.stage);
   const qs = query.toString() ? `?${query.toString()}` : '';
   const res = await apiClient.get<ApiResponse<RawListMember[]>>(`/api/lists/${id}/members${qs}`);
 
@@ -78,9 +84,16 @@ export async function getListMembers(
     companyId: row.companyId,
     contactId: row.contactId,
     icpFitScore: row.icpFitScore,
+    signalScore: row.signalScore,
+    intelligenceScore: row.intelligenceScore,
+    personaScore: row.personaScore,
     addedReason: row.addedReason,
     addedAt: row.addedAt,
     removedAt: null,
+    companyName: row.companyName,
+    companyDomain: row.companyDomain,
+    companyIndustry: row.companyIndustry,
+    pipelineStage: row.pipelineStage,
     company: row.companyId
       ? { name: row.companyName ?? '', domain: row.companyDomain } as ListMember['company']
       : undefined,
@@ -93,4 +106,30 @@ export async function getListMembers(
         } as ListMember['contact']
       : undefined,
   }));
+}
+
+export async function getFunnelStats(id: string): Promise<FunnelStats> {
+  const res = await apiClient.get<ApiResponse<FunnelStats>>(`/api/lists/${id}/funnel`);
+  return res.data;
+}
+
+export async function runCompanySignals(id: string): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/signals/company`);
+  return res.data;
+}
+
+export async function buildContacts(
+  id: string,
+  data: { personaId: string; name?: string },
+): Promise<{ jobId: string; contactListId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string; contactListId: string }>>(
+    `/api/lists/${id}/build-contacts`,
+    data,
+  );
+  return res.data;
+}
+
+export async function runPersonaSignals(id: string): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/signals/persona`);
+  return res.data;
 }

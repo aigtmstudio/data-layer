@@ -1,15 +1,16 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useRef, useCallback } from 'react';
+import type { SignalLevel } from '../types';
 import * as hypothesesApi from '../api/hypotheses';
 
 export const hypothesisKeys = {
   all: (clientId?: string) => clientId ? ['hypotheses', clientId] as const : ['hypotheses'] as const,
+  byLevel: (clientId: string, signalLevel: SignalLevel) => ['hypotheses', clientId, signalLevel] as const,
   detail: (id: string) => ['hypotheses', 'detail', id] as const,
 };
 
 export function useHypotheses(
   clientId: string | null,
-  filters?: { status?: string; category?: string; icpId?: string },
+  filters?: { status?: string; category?: string; signalLevel?: SignalLevel; icpId?: string },
   options?: { refetchInterval?: number | false },
 ) {
   return useQuery({

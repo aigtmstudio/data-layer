@@ -20,6 +20,8 @@ export interface IcpFilters {
   techCategories?: string[];
   signals?: string[];
   keywords?: string[];
+  excludeIndustries?: string[];
+  excludeKeywords?: string[];
   excludeCompanyIds?: string[];
   excludeDomains?: string[];
   providerHints?: ProviderSearchHints;

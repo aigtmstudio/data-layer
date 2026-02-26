@@ -50,31 +50,32 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
       };
 
       if (params.industries?.length) body.organization_industries = params.industries;
-      if (params.employeeCountMin || params.employeeCountMax) {
-        body.organization_num_employees_ranges = [
-          `${params.employeeCountMin ?? 1},${params.employeeCountMax ?? 1000000}`,
-        ];
+      if (params.employeeCountMin != null || params.employeeCountMax != null) {
+        body.organization_num_employees_ranges = buildEmployeeRanges(
+          params.employeeCountMin, params.employeeCountMax,
+        );
       }
-      if (params.revenueMin || params.revenueMax) {
-        body.organization_revenue_ranges = [
-          `${params.revenueMin ?? 0},${params.revenueMax ?? 10000000000}`,
-        ];
+      if (params.revenueMin != null || params.revenueMax != null) {
+        body.organization_revenue_ranges = buildRevenueRanges(
+          params.revenueMin, params.revenueMax,
+        );
       }
       if (params.fundingStages?.length) {
-        body.organization_latest_funding_stage_cd = params.fundingStages;
+        body.organization_latest_funding_stage_cd = params.fundingStages.map(normalizeFundingStage);
       }
 
       // Build location filters: countries + states + cities
+      // Apollo expects full country names (e.g. "United Kingdom"), not ISO codes (e.g. "GB")
       const locations: string[] = [];
-      if (params.countries?.length) locations.push(...params.countries);
+      if (params.countries?.length) locations.push(...params.countries.map(expandCountryCode));
       if (params.states?.length) locations.push(...params.states);
       if (params.cities?.length) locations.push(...params.cities);
       if (locations.length) body.organization_locations = locations;
 
-      if (params.keywords?.length) body.q_organization_keyword_tags = params.keywords;
-      if (params.techStack?.length) {
-        body.currently_using_any_of_technology_uids = params.techStack;
-      }
+      // Note: q_organization_keyword_tags expects Apollo's specific taxonomy tags,
+      // not freeform ICP keywords. Skipping — scoring handles keyword matching.
+      // Note: currently_using_any_of_technology_uids requires Apollo UIDs, not human-readable
+      // tech names like "React" or "PoS". Skipping — scoring handles tech stack matching.
 
       const raw = await this.request<ApolloCompanySearchResponse>(
         'post', '/mixed_companies/search', { body },
@@ -223,4 +224,113 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
     const msg = error instanceof Error ? error.message : String(error);
     return msg.includes('403') || msg.includes('API_INACCESSIBLE') || msg.includes('free plan');
   }
+}
+
+/** Map common ISO country codes to full names for Apollo's location filter */
+const COUNTRY_CODE_MAP: Record<string, string> = {
+  us: 'United States',
+  gb: 'United Kingdom',
+  uk: 'United Kingdom',
+  ca: 'Canada',
+  au: 'Australia',
+  de: 'Germany',
+  fr: 'France',
+  nl: 'Netherlands',
+  ie: 'Ireland',
+  se: 'Sweden',
+  es: 'Spain',
+  it: 'Italy',
+  in: 'India',
+  sg: 'Singapore',
+  jp: 'Japan',
+  kr: 'South Korea',
+  br: 'Brazil',
+  il: 'Israel',
+  uae: 'United Arab Emirates',
+  cn: 'China',
+  nz: 'New Zealand',
+};
+
+function expandCountryCode(code: string): string {
+  return COUNTRY_CODE_MAP[code.toLowerCase()] ?? code;
+}
+
+/**
+ * Apollo expects employee count as predefined range buckets, not arbitrary min/max.
+ * We select all buckets that overlap with the requested range.
+ */
+const EMPLOYEE_RANGE_BUCKETS = [
+  [1, 10], [11, 20], [21, 50], [51, 100], [101, 200],
+  [201, 500], [501, 1000], [1001, 2000], [2001, 5000],
+  [5001, 10000],
+] as const;
+
+function buildEmployeeRanges(min?: number, max?: number): string[] {
+  const lo = min ?? 1;
+  const hi = max ?? Infinity;
+  const ranges: string[] = [];
+  for (const [bucketMin, bucketMax] of EMPLOYEE_RANGE_BUCKETS) {
+    // Include bucket if it overlaps with the requested range
+    if (bucketMax >= lo && bucketMin <= hi) {
+      ranges.push(`${bucketMin},${bucketMax}`);
+    }
+  }
+  // Handle 10001+ if the requested max is above 10000 or unbounded
+  if (hi > 10000) {
+    ranges.push('10001,1000000');
+  }
+  return ranges.length > 0 ? ranges : ['1,1000000'];
+}
+
+/**
+ * Apollo expects revenue as predefined range buckets.
+ */
+const REVENUE_RANGE_BUCKETS = [
+  [0, 1_000_000],           // $0–$1M
+  [1_000_000, 10_000_000],  // $1M–$10M
+  [10_000_000, 50_000_000], // $10M–$50M
+  [50_000_000, 100_000_000],
+  [100_000_000, 500_000_000],
+  [500_000_000, 1_000_000_000],
+  [1_000_000_000, 10_000_000_000],
+] as const;
+
+function buildRevenueRanges(min?: number, max?: number): string[] {
+  const lo = min ?? 0;
+  const hi = max ?? Infinity;
+  const ranges: string[] = [];
+  for (const [bucketMin, bucketMax] of REVENUE_RANGE_BUCKETS) {
+    if (bucketMax >= lo && bucketMin <= hi) {
+      ranges.push(`${bucketMin},${bucketMax}`);
+    }
+  }
+  return ranges.length > 0 ? ranges : [`${lo},${max ?? 10000000000}`];
+}
+
+/**
+ * Normalize freeform funding stage strings to Apollo's expected codes.
+ * Apollo uses lowercase_underscore codes: seed, series_a, series_b, etc.
+ */
+const FUNDING_STAGE_MAP: Record<string, string> = {
+  // Direct matches
+  seed: 'seed', angel: 'angel', venture: 'venture',
+  series_a: 'series_a', series_b: 'series_b', series_c: 'series_c',
+  series_d: 'series_d', series_e: 'series_e', series_f: 'series_f',
+  series_unknown: 'series_unknown',
+  pre_ipo: 'pre_ipo', ipo: 'ipo',
+  private_equity: 'private_equity', debt_financing: 'debt_financing',
+  grant: 'grant', other: 'other',
+  // Common freeform variations
+  'series a': 'series_a', 'series b': 'series_b', 'series c': 'series_c',
+  'series d': 'series_d', 'series e': 'series_e', 'series f': 'series_f',
+  'pre-seed': 'seed', preseed: 'seed', 'pre seed': 'seed',
+  'pre-ipo': 'pre_ipo', 'pre ipo': 'pre_ipo',
+  'private equity': 'private_equity', pe: 'private_equity',
+  'debt financing': 'debt_financing', debt: 'debt_financing',
+  'early stage': 'seed', 'early-stage': 'seed',
+  'growth': 'series_unknown', 'late stage': 'series_unknown',
+};
+
+function normalizeFundingStage(stage: string): string {
+  return FUNDING_STAGE_MAP[stage.toLowerCase()] ?? stage.toLowerCase().replace(/\s+/g, '_');
 }

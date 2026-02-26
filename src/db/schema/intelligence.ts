@@ -6,6 +6,23 @@ import { personas } from './personas.js';
 
 // ── Types ──
 
+export interface TargetAudienceData {
+  description?: string;
+  evidenceFromCaseStudies?: string[];
+  buyerPersonas?: string[];
+}
+
+export interface StrategicJTBD {
+  goal: string;
+  exacerbatingConditions: string[];
+}
+
+export interface PersonaJTBD {
+  persona: string;
+  goals: string[];
+  painPoints: string[];
+}
+
 export interface ClientProfileWebsiteData {
   scrapedUrl: string;
   title?: string;
@@ -13,10 +30,14 @@ export interface ClientProfileWebsiteData {
   products?: string[];
   services?: string[];
   industries?: string[];
-  targetAudience?: string;
+  targetAudience?: string | TargetAudienceData;
   competitors?: string[];
   valueProposition?: string;
   techStack?: string[];
+  geographies?: string[];
+  strategicJTBD?: StrategicJTBD[];
+  companyTriggers?: string[];
+  personaJTBD?: PersonaJTBD[];
   rawText?: string;
 }
 

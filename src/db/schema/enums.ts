@@ -14,6 +14,9 @@ export const jobTypeEnum = pgEnum('job_type', [
   'full_enrichment_pipeline',
   'signal_hypothesis_generation',
   'market_signal_processing',
+  'company_signals',
+  'persona_signal_detection',
+  'contact_list_build',
 ]);
 
 export const creditTransactionTypeEnum = pgEnum('credit_transaction_type', [
@@ -35,7 +38,16 @@ export const exportFormatEnum = pgEnum('export_format', [
 ]);
 
 export const signalCategoryEnum = pgEnum('signal_category', [
-  'regulatory', 'economic', 'technology', 'competitive',
+  // Market-level
+  'regulatory', 'economic', 'industry', 'competitive',
+  // Company-level
+  'funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch',
+  // Persona-level
+  'job_change', 'title_match', 'seniority_match', 'tenure_signal',
+]);
+
+export const signalLevelEnum = pgEnum('signal_level', [
+  'market', 'company', 'persona',
 ]);
 
 export const hypothesisStatusEnum = pgEnum('hypothesis_status', [

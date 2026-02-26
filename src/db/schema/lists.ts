@@ -21,10 +21,11 @@ export const lists = pgTable('lists', {
   icpId: uuid('icp_id').references(() => icps.id, { onDelete: 'set null' }),
   personaId: uuid('persona_id').references(() => personas.id, { onDelete: 'set null' }),
   strategyId: uuid('strategy_id').references(() => strategies.id, { onDelete: 'set null' }),
+  sourceCompanyListId: uuid('source_company_list_id'),
 
   name: text('name').notNull(),
   description: text('description'),
-  type: listTypeEnum('type').notNull().default('contact'),
+  type: listTypeEnum('type').notNull().default('company'),
 
   filterSnapshot: jsonb('filter_snapshot').$type<ListFilterSnapshot>(),
 
@@ -52,6 +53,7 @@ export const listMembers = pgTable('list_members', {
   signalScore: numeric('signal_score', { precision: 3, scale: 2 }),
   originalityScore: numeric('originality_score', { precision: 3, scale: 2 }),
   intelligenceScore: numeric('intelligence_score', { precision: 3, scale: 2 }),
+  personaScore: numeric('persona_score', { precision: 3, scale: 2 }),
   addedReason: text('added_reason'),
 
   addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),

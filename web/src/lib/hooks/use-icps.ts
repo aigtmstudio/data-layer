@@ -28,6 +28,15 @@ export function useIcp(clientId: string | null, icpId: string | null) {
   });
 }
 
+export function useIcpById(icpId: string | null) {
+  return useQuery({
+    queryKey: ['icps', 'by-id', icpId] as const,
+    queryFn: () => icpsApi.getIcpById(icpId!),
+    enabled: !!icpId,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCreateIcp() {
   const qc = useQueryClient();
   return useMutation({

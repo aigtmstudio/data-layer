@@ -8,10 +8,11 @@ import { PROVIDER_PROFILES, SIGNAL_DEFINITIONS } from './provider-knowledge.js';
 import type { ProviderPerformanceTracker, ProviderStats } from './provider-performance-tracker.js';
 import type { ClientProfileService } from './client-profile.js';
 import { logger } from '../../lib/logger.js';
+import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
 const STRATEGY_TTL_HOURS = 24;
 
-const STRATEGY_PROMPT = `You are an AI strategist for a B2B data enrichment platform. Your job is to analyze the client's situation and determine the optimal strategy for building a prospect list.
+export const STRATEGY_PROMPT = `You are an AI strategist for a B2B data enrichment platform. Your job is to analyze the client's situation and determine the optimal strategy for building a prospect list.
 
 You have access to 13 data providers, each with different strengths, costs, and data characteristics. Your goal is to select and prioritize providers to:
 1. Maximize data quality and completeness
@@ -47,8 +48,19 @@ Rules:
 - For niche industries, prioritize providers with deep knowledge graph data
 - Always explain your reasoning`;
 
+registerPrompt({
+  key: 'strategy.generation.system',
+  label: 'Strategy Generation',
+  area: 'Strategy',
+  promptType: 'system',
+  model: 'claude-sonnet-4-20250514',
+  description: 'System prompt for determining optimal provider strategy for list building',
+  defaultContent: STRATEGY_PROMPT,
+});
+
 export class StrategyGenerator {
   private anthropic: Anthropic;
+  private promptConfig?: PromptConfigService;
 
   constructor(
     anthropicApiKey: string,
@@ -56,6 +68,10 @@ export class StrategyGenerator {
     private performanceTracker: ProviderPerformanceTracker,
   ) {
     this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  }
+
+  setPromptConfig(promptConfig: PromptConfigService) {
+    this.promptConfig = promptConfig;
   }
 
   async generateStrategy(
@@ -191,10 +207,15 @@ export class StrategyGenerator {
   }
 
   private async callLlm(contextPrompt: string): Promise<StrategyData> {
+    let strategyPrompt = STRATEGY_PROMPT;
+    if (this.promptConfig) {
+      try { strategyPrompt = await this.promptConfig.getPrompt('strategy.generation.system'); } catch { /* use default */ }
+    }
+
     const message = await this.anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: STRATEGY_PROMPT,
+      system: strategyPrompt,
       messages: [{ role: 'user', content: contextPrompt }],
     });
 

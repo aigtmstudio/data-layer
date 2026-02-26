@@ -25,6 +25,7 @@ export interface WaterfallResult<T> {
   result: T | null;
   providersUsed: string[];
   totalCost: number;
+  skippedDueToCredits?: number;
 }
 
 const DEFAULT_CONFIG: WaterfallConfig = {
@@ -132,6 +133,7 @@ export class SourceOrchestrator {
     const allResults: UnifiedCompany[] = [];
     const providersUsed: string[] = [];
     let totalCost = 0;
+    let skippedDueToCredits = 0;
     const seenDomains = new Set<string>();
 
     const searchProviders = this.getProvidersWithCapability('company_search', cfg.providerOverride);
@@ -147,6 +149,7 @@ export class SourceOrchestrator {
       const hasCredits = await this.creditManager.hasBalance(clientId, 1);
       if (!hasCredits) {
         logger.warn({ clientId, provider: provider.name }, 'Insufficient credits, skipping provider');
+        skippedDueToCredits++;
         continue;
       }
 
@@ -195,7 +198,7 @@ export class SourceOrchestrator {
       }
     }
 
-    return { result: allResults, providersUsed, totalCost };
+    return { result: allResults, providersUsed, totalCost, skippedDueToCredits };
   }
 
   async searchPeople(

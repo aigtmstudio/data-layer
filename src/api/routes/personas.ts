@@ -52,6 +52,7 @@ export const personaRoutes: FastifyPluginAsync<PersonaRouteOpts> = async (app, o
       const [persona] = await db
         .insert(schema.personas)
         .values({
+          clientId: request.params.clientId,
           icpId: request.params.icpId,
           ...body,
         })
@@ -131,6 +132,7 @@ export const personaRoutes: FastifyPluginAsync<PersonaRouteOpts> = async (app, o
       const [persona] = await db
         .insert(schema.personas)
         .values({
+          clientId: request.params.clientId,
           icpId: request.params.icpId,
           name: result.suggestedPersona.name,
           description: result.suggestedPersona.reasoning,

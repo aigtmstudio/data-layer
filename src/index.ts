@@ -19,6 +19,7 @@ import {
   DynamicOrchestrator,
   HypothesisGenerator,
   MarketSignalProcessor,
+  PersonaSignalDetector,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -34,6 +35,7 @@ import { AgentQlProvider } from './providers/agentql/index.js';
 import { FirecrawlProvider } from './providers/firecrawl/index.js';
 import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
 import { CompanyDiscoveryService } from './services/company-discovery/index.js';
+import { PromptConfigService } from './services/prompt-config/index.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -45,6 +47,7 @@ export interface ServiceContainer {
   icpParser: IcpParser;
   sourceProcessor: SourceProcessor;
   scheduler: Scheduler;
+  promptConfigService: PromptConfigService;
   // Intelligence layer
   performanceTracker: ProviderPerformanceTracker;
   clientProfileService: ClientProfileService;
@@ -55,6 +58,7 @@ export interface ServiceContainer {
   // Signal pipeline
   hypothesisGenerator: HypothesisGenerator;
   marketSignalProcessor: MarketSignalProcessor;
+  personaSignalDetector: PersonaSignalDetector;
 }
 
 let container: ServiceContainer;
@@ -69,7 +73,12 @@ async function main() {
   initDb(config.databaseUrl);
   logger.info('Database initialized');
 
-  // 2. Initialize services
+  // 2. Initialize prompt config service
+  const promptConfigService = new PromptConfigService();
+  await promptConfigService.loadCache();
+  logger.info('Prompt config loaded');
+
+  // 3. Initialize services
   const creditManager = new CreditManager();
   const orchestrator = new SourceOrchestrator(creditManager);
 
@@ -90,10 +99,13 @@ async function main() {
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline, config.anthropicApiKey);
+  discoveryService.setPromptConfig(promptConfigService);
   const listBuilder = new ListBuilder();
   listBuilder.setDiscoveryService(discoveryService);
+  // Signal services wired below after construction (see intelligence layer section)
   const exportEngine = new ExportEngine();
   const icpParser = new IcpParser(config.anthropicApiKey);
+  icpParser.setPromptConfig(promptConfigService);
   const documentExtractor = new DocumentExtractor();
   const sourceProcessor = new SourceProcessor(documentExtractor);
   const scheduler = new Scheduler(config.databaseUrl);
@@ -103,18 +115,33 @@ async function main() {
   orchestrator.setPerformanceTracker(performanceTracker);
 
   const clientProfileService = new ClientProfileService(orchestrator, config.anthropicApiKey);
+  clientProfileService.setPromptConfig(promptConfigService);
   const signalDetector = new SignalDetector(config.anthropicApiKey);
+  signalDetector.setPromptConfig(promptConfigService);
   const intelligenceScorer = new IntelligenceScorer();
   const strategyGenerator = new StrategyGenerator(config.anthropicApiKey, clientProfileService, performanceTracker);
+  strategyGenerator.setPromptConfig(promptConfigService);
   const dynamicOrchestrator = new DynamicOrchestrator(
     orchestrator, strategyGenerator, signalDetector, intelligenceScorer, clientProfileService,
   );
 
+  // Wire signal services into list builder so builds include signal detection
+  listBuilder.setSignalDetector(signalDetector);
+  listBuilder.setIntelligenceScorer(intelligenceScorer);
+  listBuilder.setClientProfileService(clientProfileService);
+
   // Signal pipeline
   const hypothesisGenerator = new HypothesisGenerator(config.anthropicApiKey, clientProfileService);
+  hypothesisGenerator.setPromptConfig(promptConfigService);
   const marketSignalProcessor = new MarketSignalProcessor(config.anthropicApiKey);
+  marketSignalProcessor.setPromptConfig(promptConfigService);
+  const personaSignalDetector = new PersonaSignalDetector(config.anthropicApiKey);
+  personaSignalDetector.setPromptConfig(promptConfigService);
 
-  // 3. Store in container
+  // Wire persona signal detector into list builder
+  listBuilder.setPersonaSignalDetector(personaSignalDetector);
+
+  // 4. Store in container
   container = {
     creditManager,
     orchestrator,
@@ -124,6 +151,7 @@ async function main() {
     icpParser,
     sourceProcessor,
     scheduler,
+    promptConfigService,
     performanceTracker,
     clientProfileService,
     signalDetector,
@@ -132,9 +160,10 @@ async function main() {
     dynamicOrchestrator,
     hypothesisGenerator,
     marketSignalProcessor,
+    personaSignalDetector,
   };
 
-  // 4. Start scheduler with handlers
+  // 5. Start scheduler with handlers
   await scheduler.start({
     onListRefresh: async (data) => {
       await listBuilder.refreshList(data.listId);
@@ -155,7 +184,7 @@ async function main() {
     },
   });
 
-  // 5. Start API server
+  // 6. Start API server
   const app = await buildApp(config.apiKey, container);
   await app.listen({ port: config.apiPort, host: '0.0.0.0' });
   logger.info({ port: config.apiPort }, 'Data Layer API started');

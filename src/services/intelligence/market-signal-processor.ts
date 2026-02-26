@@ -2,12 +2,13 @@ import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
 import { eq, and, desc, sql } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
+import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
-const CLASSIFICATION_PROMPT = `You are a market signal classifier. Given a market signal (headline + summary) and a set of active hypotheses, determine:
+export const CLASSIFICATION_PROMPT = `You are a market signal classifier. Given a market signal (headline + summary) and a set of active hypotheses, determine:
 
 1. Which hypothesis (if any) this signal best matches
 2. A relevance score (0.00-1.00) — how strongly this signal relates to the matched hypothesis
-3. The signal category (regulatory, economic, technology, competitive)
+3. The signal category (regulatory, economic, industry, competitive)
 4. Which market segments are affected
 
 If no hypothesis matches well, set hypothesisIndex to -1 and still classify the category and relevance.
@@ -16,7 +17,7 @@ Return ONLY valid JSON:
 {
   "hypothesisIndex": number (-1 if no match),
   "relevanceScore": number (0.00-1.00),
-  "signalCategory": "regulatory"|"economic"|"technology"|"competitive",
+  "signalCategory": "regulatory"|"economic"|"industry"|"competitive",
   "affectedSegments": string[],
   "reasoning": string
 }`;
@@ -40,11 +41,26 @@ export interface SignalFeedOptions {
   offset?: number;
 }
 
+registerPrompt({
+  key: 'signal.market.classification.system',
+  label: 'Market Signal Classification',
+  area: 'Signal Detection',
+  promptType: 'system',
+  model: 'claude-haiku-4-5-20251001',
+  description: 'System prompt for classifying incoming market signals against active hypotheses',
+  defaultContent: CLASSIFICATION_PROMPT,
+});
+
 export class MarketSignalProcessor {
   private anthropic: Anthropic;
+  private promptConfig?: PromptConfigService;
 
   constructor(anthropicApiKey: string) {
     this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  }
+
+  setPromptConfig(promptConfig: PromptConfigService) {
+    this.promptConfig = promptConfig;
   }
 
   async ingestSignal(input: IngestSignalInput) {
@@ -139,10 +155,15 @@ export class MarketSignalProcessor {
         try {
           const userMessage = `## Signal\nHeadline: ${signal.headline}\n${signal.summary ? `Summary: ${signal.summary}` : ''}\n${signal.sourceName ? `Source: ${signal.sourceName}` : ''}\n\n## Active Hypotheses\n${hypothesesContext}`;
 
+          let classificationPrompt = CLASSIFICATION_PROMPT;
+          if (this.promptConfig) {
+            try { classificationPrompt = await this.promptConfig.getPrompt('signal.market.classification.system'); } catch { /* use default */ }
+          }
+
           const message = await this.anthropic.messages.create({
             model: 'claude-haiku-4-5-20251001',
             max_tokens: 512,
-            system: CLASSIFICATION_PROMPT,
+            system: classificationPrompt,
             messages: [{ role: 'user', content: userMessage }],
           });
 
@@ -166,7 +187,7 @@ export class MarketSignalProcessor {
             : null;
 
           // Validate category
-          const validCategories = ['regulatory', 'economic', 'technology', 'competitive'] as const;
+          const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
           const category = validCategories.includes(classification.signalCategory as typeof validCategories[number])
             ? classification.signalCategory as typeof validCategories[number]
             : null;
@@ -188,7 +209,7 @@ export class MarketSignalProcessor {
 
           // If high relevance, promote companies from TAM to active_segment
           if (classification.relevanceScore >= 0.7 && classification.affectedSegments?.length > 0) {
-            await this.promoteCompanies(cId, classification.affectedSegments, signal.id, matchedHypothesis?.id);
+            await this.promoteCompanies(cId, classification.affectedSegments, signal.id, matchedHypothesis?.id, classification.relevanceScore);
           }
 
           log.debug({
@@ -222,20 +243,19 @@ export class MarketSignalProcessor {
     affectedSegments: string[],
     signalId: string,
     hypothesisId?: string | null,
+    relevanceScore?: number,
   ) {
     const db = getDb();
     const log = logger.child({ clientId, signalId, segments: affectedSegments });
 
-    // Find TAM companies for this client that match the affected segments
-    // We match by industry overlap with affected segments
+    // Find all TAM companies for this client that match the affected segments
     const tamCompanies = await db
       .select()
       .from(schema.companies)
       .where(and(
         eq(schema.companies.clientId, clientId),
         eq(schema.companies.pipelineStage, 'tam'),
-      ))
-      .limit(100);
+      ));
 
     if (tamCompanies.length === 0) {
       log.debug('No TAM companies to promote');
@@ -276,7 +296,7 @@ export class MarketSignalProcessor {
           companyId: company.id,
           clientId,
           signalType: 'market_signal',
-          signalStrength: '0.70',
+          signalStrength: String(Math.max(0, Math.min(1, relevanceScore ?? 0.70)).toFixed(2)),
           signalData: {
             evidence: `Promoted by market signal: ${signalId}`,
             details: { marketSignalId: signalId, hypothesisId },
@@ -309,7 +329,7 @@ export class MarketSignalProcessor {
     const conditions = [eq(schema.marketSignals.clientId, options.clientId)];
 
     if (options.category) {
-      const validCategories = ['regulatory', 'economic', 'technology', 'competitive'] as const;
+      const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
       if (validCategories.includes(options.category as typeof validCategories[number])) {
         conditions.push(eq(schema.marketSignals.signalCategory, options.category as typeof validCategories[number]));
       }

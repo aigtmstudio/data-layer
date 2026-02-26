@@ -126,7 +126,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const [newIcpNl, setNewIcpNl] = useState('');
   const [newHypothesisOpen, setNewHypothesisOpen] = useState(false);
   const [newHypothesisText, setNewHypothesisText] = useState('');
-  const [newHypothesisCategory, setNewHypothesisCategory] = useState<string>('technology');
+  const [newHypothesisCategory, setNewHypothesisCategory] = useState<string>('competitive');
   const [newHypothesisDetection, setNewHypothesisDetection] = useState('news_search');
   const [newHypothesisSegments, setNewHypothesisSegments] = useState('');
   const [newHypothesisPriority, setNewHypothesisPriority] = useState('5');
@@ -378,7 +378,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             ]}
             data={icps ?? []}
             onRowClick={(icp) => {
-              window.location.href = `/icps/${icp.id}?clientId=${id}`;
+              window.location.href = `/icps/${icp.id}`;
             }}
           />
         </TabsContent>
@@ -433,7 +433,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 onClick={async () => {
                   try {
                     prevCountRef.current = hypotheses?.length ?? 0;
-                    await generateHypotheses.mutateAsync({ clientId: id });
+                    await generateHypotheses.mutateAsync({ clientId: id, signalLevel: 'market' });
                     setAwaitingGeneration(true);
                     toast.success('Hypothesis generation started — results will appear shortly');
                   } catch {
@@ -630,7 +630,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                   <SelectContent>
                     <SelectItem value="regulatory">Regulatory</SelectItem>
                     <SelectItem value="economic">Economic</SelectItem>
-                    <SelectItem value="technology">Technology</SelectItem>
+                    <SelectItem value="industry">Industry</SelectItem>
                     <SelectItem value="competitive">Competitive</SelectItem>
                   </SelectContent>
                 </Select>
@@ -682,6 +682,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     await createHypothesis.mutateAsync({
                       clientId: id,
                       hypothesis: newHypothesisText.trim(),
+                      signalLevel: 'market',
                       signalCategory: newHypothesisCategory,
                       monitoringSources: [newHypothesisDetection],
                       affectedSegments: newHypothesisSegments ? newHypothesisSegments.split(',').map(s => s.trim()).filter(Boolean) : undefined,
@@ -689,7 +690,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                     });
                     setNewHypothesisOpen(false);
                     setNewHypothesisText('');
-                    setNewHypothesisCategory('technology');
+                    setNewHypothesisCategory('competitive');
                     setNewHypothesisDetection('news_search');
                     setNewHypothesisSegments('');
                     setNewHypothesisPriority('5');

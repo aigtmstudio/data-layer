@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
 import type { ProcessedSource, CrmInsights } from './source-processor.js';
 import { logger } from '../../lib/logger.js';
+import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
 function extractJson(text: string): unknown {
   // Strip markdown code fences if present
@@ -36,7 +37,7 @@ export interface SuggestedPersona {
 
 // ── Single-source prompt (backward compat) ──
 
-const SINGLE_SOURCE_SYSTEM_PROMPT = `You are an ICP (Ideal Customer Profile) parser for B2B sales.
+export const SINGLE_SOURCE_SYSTEM_PROMPT = `You are an ICP (Ideal Customer Profile) parser for B2B sales.
 Given a natural language description of an ideal customer, extract structured filters.
 
 Return ONLY valid JSON matching this schema:
@@ -87,11 +88,20 @@ Rules:
 - For tech stack, list specific product names that companies of this size would realistically use and pay for.
 - For signals, use snake_case descriptors (e.g., "recent_funding", "hiring_engineering", "new_product_launch")
 - ONLY include fields that are explicitly or strongly implied by the input
-- Omit fields that cannot be determined (set to null or empty array) — do not guess`;
+- Omit fields that cannot be determined (set to null or empty array) — do not guess
+
+Industry naming rules (CRITICAL):
+- Use LinkedIn's standard industry taxonomy names. These are used by data providers for exact matching.
+- Common examples: "restaurants", "hospitality", "food & beverages", "information technology & services", "computer software", "financial services", "banking", "insurance", "real estate", "construction", "retail", "wholesale", "telecommunications", "pharmaceuticals", "medical devices", "health, wellness & fitness", "hospitals & health care", "education management", "e-learning", "automotive", "aviation & aerospace", "oil & energy", "mining & metals", "utilities", "logistics & supply chain", "warehousing", "marketing & advertising", "human resources", "staffing & recruiting", "accounting", "legal services", "management consulting", "mechanical or industrial engineering", "consumer electronics", "sporting goods", "furniture", "textiles", "food production", "dairy", "farming", "entertainment", "gambling & casinos", "leisure, travel & tourism", "broadcast media", "newspapers", "online media"
+- Do NOT invent compound or descriptive industries like "restaurant technology" or "hospitality SaaS" — use the standard name and put the specificity in keywords instead.
+
+Funding stage naming rules:
+- Use lowercase_underscore codes: "seed", "angel", "venture", "series_a", "series_b", "series_c", "series_d", "series_e", "series_f", "pre_ipo", "ipo", "private_equity", "debt_financing", "grant"
+- Do NOT use "Series A" or "Pre-IPO" — use the underscore form.`;
 
 // ── Multi-source prompt ──
 
-const MULTI_SOURCE_SYSTEM_PROMPT = `You are an advanced ICP (Ideal Customer Profile) builder for B2B sales intelligence.
+export const MULTI_SOURCE_SYSTEM_PROMPT = `You are an advanced ICP (Ideal Customer Profile) builder for B2B sales intelligence.
 You will receive data from multiple sources (documents, call transcripts, manual selectors, CRM deal data).
 Your job is to synthesize all sources into a unified ICP definition that is optimized for data provider searches.
 
@@ -191,15 +201,51 @@ General rules:
 - signals: snake_case descriptors (e.g., "recent_funding", "hiring_engineering")
 - confidence: 0-1 based on how much supporting evidence exists across sources
 - sourceContributions: list which fields each source type influenced (e.g., ["industries", "employeeCountMin"])
-- ONLY include fields with actual evidence from the sources. Do not guess or pad with plausible-sounding values. When unsure, omit (null or empty array).`;
+- ONLY include fields with actual evidence from the sources. Do not guess or pad with plausible-sounding values. When unsure, omit (null or empty array).
+
+Industry naming rules (CRITICAL):
+- Use LinkedIn's standard industry taxonomy names. These are used by data providers for exact matching.
+- Common examples: "restaurants", "hospitality", "food & beverages", "information technology & services", "computer software", "financial services", "banking", "insurance", "real estate", "construction", "retail", "wholesale", "telecommunications", "pharmaceuticals", "medical devices", "health, wellness & fitness", "hospitals & health care", "education management", "e-learning", "automotive", "aviation & aerospace", "oil & energy", "mining & metals", "utilities", "logistics & supply chain", "warehousing", "marketing & advertising", "human resources", "staffing & recruiting", "accounting", "legal services", "management consulting", "mechanical or industrial engineering", "consumer electronics", "sporting goods", "furniture", "textiles", "food production", "dairy", "farming", "entertainment", "gambling & casinos", "leisure, travel & tourism", "broadcast media", "newspapers", "online media"
+- Do NOT invent compound or descriptive industries like "restaurant technology" or "hospitality SaaS" — use the standard name and put the specificity in keywords instead.
+
+Funding stage naming rules:
+- Use lowercase_underscore codes: "seed", "angel", "venture", "series_a", "series_b", "series_c", "series_d", "series_e", "series_f", "pre_ipo", "ipo", "private_equity", "debt_financing", "grant"
+- Do NOT use "Series A" or "Pre-IPO" — use the underscore form.`;
+
+// ── Register prompts ──
+
+registerPrompt({
+  key: 'icp.single.system',
+  label: 'ICP Single-Source Parsing',
+  area: 'ICP Engine',
+  promptType: 'system',
+  model: 'claude-sonnet-4-20250514',
+  description: 'System prompt for parsing a natural language ICP description into structured filters',
+  defaultContent: SINGLE_SOURCE_SYSTEM_PROMPT,
+});
+
+registerPrompt({
+  key: 'icp.multi.system',
+  label: 'ICP Multi-Source Parsing',
+  area: 'ICP Engine',
+  promptType: 'system',
+  model: 'claude-sonnet-4-20250514',
+  description: 'System prompt for synthesising multiple sources (docs, transcripts, CRM, selectors) into a unified ICP',
+  defaultContent: MULTI_SOURCE_SYSTEM_PROMPT,
+});
 
 // ── Parser class ──
 
 export class IcpParser {
   private anthropic: Anthropic;
+  private promptConfig?: PromptConfigService;
 
   constructor(apiKey: string) {
     this.anthropic = new Anthropic({ apiKey });
+  }
+
+  setPromptConfig(promptConfig: PromptConfigService) {
+    this.promptConfig = promptConfig;
   }
 
   /**
@@ -208,10 +254,15 @@ export class IcpParser {
   async parseNaturalLanguage(input: string): Promise<{ filters: IcpFilters; confidence: number }> {
     logger.info({ inputLength: input.length }, 'Parsing ICP from natural language');
 
+    let singlePrompt = SINGLE_SOURCE_SYSTEM_PROMPT;
+    if (this.promptConfig) {
+      try { singlePrompt = await this.promptConfig.getPrompt('icp.single.system'); } catch { /* use default */ }
+    }
+
     const message = await this.anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1024,
-      system: SINGLE_SOURCE_SYSTEM_PROMPT,
+      system: singlePrompt,
       messages: [
         { role: 'user', content: input },
       ],
@@ -244,10 +295,15 @@ export class IcpParser {
 
     const userPrompt = buildMultiSourcePrompt(input);
 
+    let multiPrompt = MULTI_SOURCE_SYSTEM_PROMPT;
+    if (this.promptConfig) {
+      try { multiPrompt = await this.promptConfig.getPrompt('icp.multi.system'); } catch { /* use default */ }
+    }
+
     const message = await this.anthropic.messages.create({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
-      system: MULTI_SOURCE_SYSTEM_PROMPT,
+      system: multiPrompt,
       messages: [
         { role: 'user', content: userPrompt },
       ],

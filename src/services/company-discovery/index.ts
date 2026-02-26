@@ -43,6 +43,21 @@ const BLOCKED_DOMAINS = new Set([
   'google.com',
 ]);
 
+// Platform/social site names to block even when domain is null
+// (e.g. Apollo returns "Linktree" with no domain)
+const BLOCKED_NAMES = new Set([
+  'linktree', 'facebook', 'instagram', 'twitter', 'linkedin',
+  'youtube', 'tiktok', 'pinterest', 'reddit', 'medium',
+  'substack', 'github', 'wordpress', 'squarespace',
+  'wix', 'weebly', 'tumblr', 'glassdoor', 'indeed',
+  'crunchbase', 'yelp', 'tripadvisor', 'wikipedia',
+]);
+
+export function isBlockedCompanyName(name: string | undefined): boolean {
+  if (!name) return false;
+  return BLOCKED_NAMES.has(name.toLowerCase().trim());
+}
+
 export function isBlockedDomain(domain: string | undefined): boolean {
   if (!domain) return false;
   const lower = domain.toLowerCase().replace(/^www\./, '');
@@ -82,6 +97,15 @@ const NON_COMPANY_PATTERNS = [
   /\bjobs?\s+(in|at|for)\b/i, // Job listing pages
   /\bcareers?\s+(in|at)\b/i,
 ];
+
+/** Check if a company name looks like a real company (not a directory, awards page, etc.) */
+export function isPlausibleCompanyName(name: string | undefined): boolean {
+  if (!name) return true; // No name to check — don't reject
+  for (const pattern of NON_COMPANY_PATTERNS) {
+    if (pattern.test(name)) return false;
+  }
+  return true;
+}
 
 function isPlausibleCompany(company: UnifiedCompany): boolean {
   // Companies without domains are suspicious but might be from AI discovery
@@ -211,7 +235,7 @@ export class CompanyDiscoveryService {
     const { result: discovered, providersUsed, totalCost, skippedDueToCredits } =
       await this.orchestrator.searchCompanies(params.clientId, searchParams);
 
-    let companies = (discovered ?? []).filter(c => !isBlockedDomain(c.domain));
+    let companies = (discovered ?? []).filter(c => !isBlockedDomain(c.domain) && !isBlockedCompanyName(c.name));
     const blockedCount = (discovered?.length ?? 0) - companies.length;
     if (blockedCount > 0) {
       logger.info({ blockedCount }, 'Filtered out companies with blocked domains (social/platform sites)');

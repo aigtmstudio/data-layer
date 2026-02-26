@@ -60,6 +60,7 @@ interface RawListMember {
   companyName: string | null;
   companyDomain: string | null;
   companyIndustry: string | null;
+  companySource: string | null;
   pipelineStage: PipelineStage | null;
   contactName: string | null;
   contactTitle: string | null;
@@ -93,6 +94,7 @@ export async function getListMembers(
     companyName: row.companyName,
     companyDomain: row.companyDomain,
     companyIndustry: row.companyIndustry,
+    companySource: row.companySource,
     pipelineStage: row.pipelineStage,
     company: row.companyId
       ? { name: row.companyName ?? '', domain: row.companyDomain } as ListMember['company']

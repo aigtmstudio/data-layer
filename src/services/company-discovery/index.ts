@@ -632,7 +632,7 @@ export class CompanyDiscoveryService {
       state: data.state,
       country: data.country,
       address: data.address,
-      techStack: data.techStack ?? [],
+      techStack: data.techStack?.length ? data.techStack : undefined,
       logoUrl: data.logoUrl,
       description: data.description,
       phone: data.phone,
@@ -656,14 +656,21 @@ export class CompanyDiscoveryService {
         .limit(1);
 
       if (existing.length > 0) {
-        await db.update(schema.companies).set(dbFields).where(eq(schema.companies.id, existing[0].id));
+        // Only update fields that have data — don't overwrite existing enriched fields with empty values
+        const updateFields: Record<string, unknown> = { updatedAt: now };
+        for (const [key, value] of Object.entries(dbFields)) {
+          if (value !== undefined && value !== null && key !== 'updatedAt') {
+            updateFields[key] = value;
+          }
+        }
+        await db.update(schema.companies).set(updateFields).where(eq(schema.companies.id, existing[0].id));
         return existing[0];
       }
     }
 
     const [inserted] = await db
       .insert(schema.companies)
-      .values({ clientId, ...dbFields })
+      .values({ clientId, ...dbFields, techStack: dbFields.techStack ?? [] })
       .returning({ id: schema.companies.id });
     return inserted;
   }

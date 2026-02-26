@@ -37,3 +37,15 @@ export async function processSignals(data?: {
 }): Promise<void> {
   await apiClient.post('/api/market-signals/process', data ?? {});
 }
+
+export async function searchEvidence(data: {
+  clientId: string;
+  hypothesisIds?: string[];
+  maxSearchesPerHypothesis?: number;
+}): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string; message: string }>>(
+    '/api/market-signals/search-evidence',
+    data,
+  );
+  return res.data;
+}

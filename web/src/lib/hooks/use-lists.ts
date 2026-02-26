@@ -139,3 +139,28 @@ export function useRunPersonaSignals() {
     },
   });
 }
+
+export function useApplyMarketSignals() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: listsApi.applyMarketSignals,
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.funnel(listId) });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
+  });
+}
+
+export function useDeepEnrich() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: listsApi.deepEnrich,
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
+  });
+}

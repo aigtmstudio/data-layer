@@ -51,6 +51,40 @@ registerPrompt({
   defaultContent: CLASSIFICATION_PROMPT,
 });
 
+export const PROMOTION_PROMPT = `You are a market analyst evaluating whether a market event affects specific companies.
+
+A market signal has been detected. For each company below, evaluate whether this signal meaningfully affects their business using their PESTLE profile.
+
+## Evaluation Rules
+
+- A company IS affected if their PESTLE profile shows DIRECT exposure to the forces described in the signal.
+- A company is NOT affected if the relevant PESTLE dimension shows "No evidence" or no clear connection.
+- Only mark affected=true when there is SPECIFIC evidence in the company's profile — not generic industry overlap.
+- Confidence should reflect how directly the signal connects to the company's specific situation.
+
+## Signal-to-PESTLE Mapping
+
+Use this mapping to focus your evaluation on the most relevant PESTLE dimensions:
+- regulatory signal → check Legal, Political dimensions
+- economic signal → check Economic dimension
+- industry signal → check Social, Technological dimensions
+- competitive signal → check Technological, Economic dimensions
+
+Return ONLY a valid JSON array of objects for companies where affected=true:
+[{ "companyIndex": number, "affected": true, "confidence": number (0.0-1.0), "pestleDimension": "Political"|"Economic"|"Social"|"Technological"|"Legal"|"Environmental", "reasoning": "1 sentence referencing specific PESTLE evidence from the profile" }]
+
+If NO companies are affected, return an empty array: []`;
+
+registerPrompt({
+  key: 'signal.market.promotion.system',
+  label: 'Market Signal Company Promotion',
+  area: 'Signal Detection',
+  promptType: 'system',
+  model: 'claude-haiku-4-5-20251001',
+  description: 'System prompt for evaluating which companies are affected by a market signal using PESTLE profiles',
+  defaultContent: PROMOTION_PROMPT,
+});
+
 export class MarketSignalProcessor {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
@@ -209,7 +243,11 @@ export class MarketSignalProcessor {
 
           // If high relevance, promote companies from TAM to active_segment
           if (classification.relevanceScore >= 0.7 && classification.affectedSegments?.length > 0) {
-            await this.promoteCompanies(cId, classification.affectedSegments, signal.id, matchedHypothesis?.id, classification.relevanceScore);
+            await this.promoteCompanies(
+              cId, classification.affectedSegments, signal.id,
+              matchedHypothesis?.id, classification.relevanceScore,
+              { headline: signal.headline, summary: signal.summary ?? undefined, category: classification.signalCategory },
+            );
           }
 
           log.debug({
@@ -244,11 +282,12 @@ export class MarketSignalProcessor {
     signalId: string,
     hypothesisId?: string | null,
     relevanceScore?: number,
+    signalContext?: { headline: string; summary?: string; category?: string },
   ) {
     const db = getDb();
     const log = logger.child({ clientId, signalId, segments: affectedSegments });
 
-    // Find all TAM companies for this client that match the affected segments
+    // Load all TAM companies for this client
     const tamCompanies = await db
       .select()
       .from(schema.companies)
@@ -258,29 +297,101 @@ export class MarketSignalProcessor {
       ));
 
     if (tamCompanies.length === 0) {
-      log.debug('No TAM companies to promote');
+      log.debug('No TAM companies to evaluate');
       return;
     }
 
-    // Simple segment matching — check if company industry/description overlaps with affected segments
-    const segmentKeywords = affectedSegments.map(s => s.toLowerCase());
-    const matchingCompanies = tamCompanies.filter(company => {
-      const companyText = [company.industry, company.description, company.subIndustry]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase();
-      return segmentKeywords.some(kw => companyText.includes(kw));
-    });
+    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM companies against market signal');
 
-    if (matchingCompanies.length === 0) {
-      log.debug('No matching TAM companies for segments');
+    // Get promotion prompt
+    let promotionPrompt = PROMOTION_PROMPT;
+    if (this.promptConfig) {
+      try { promotionPrompt = await this.promptConfig.getPrompt('signal.market.promotion.system'); } catch { /* use default */ }
+    }
+
+    // Map signal category to primary PESTLE dimensions
+    const pestleFocus: Record<string, string> = {
+      regulatory: 'Legal and Political',
+      economic: 'Economic',
+      industry: 'Social and Technological',
+      competitive: 'Technological and Economic',
+    };
+    const primaryDimensions = pestleFocus[signalContext?.category ?? ''] ?? 'all dimensions';
+
+    // Build signal description
+    const signalDescription = signalContext
+      ? `HEADLINE: ${signalContext.headline}\n${signalContext.summary ? `SUMMARY: ${signalContext.summary}` : ''}`
+      : `Signal ID: ${signalId}`;
+
+    // Process in batches of 12 companies
+    const BATCH_SIZE = 12;
+    const promotedCompanies: Array<{ company: typeof tamCompanies[0]; confidence: number; pestleDimension: string; reasoning: string }> = [];
+
+    for (let i = 0; i < tamCompanies.length; i += BATCH_SIZE) {
+      const batch = tamCompanies.slice(i, i + BATCH_SIZE);
+
+      const companiesBlock = batch.map((c, idx) => {
+        const profile = c.websiteProfile
+          ?? ([c.description, c.industry ? `Industry: ${c.industry}` : '', c.subIndustry ? `Sub-industry: ${c.subIndustry}` : '']
+            .filter(Boolean).join('\n')
+          || 'No profile available');
+        // Cap profile text to keep prompt manageable
+        const trimmedProfile = profile.length > 1500 ? profile.slice(0, 1500) + '...' : profile;
+        return `[${idx}] ${c.name} | ${c.industry ?? 'Unknown industry'}\n    PESTLE Profile:\n    ${trimmedProfile}`;
+      }).join('\n\n');
+
+      const userMessage = `## Market Signal\n${signalDescription}\nAFFECTED SEGMENTS: ${affectedSegments.join(', ')}\nSIGNAL CATEGORY: ${signalContext?.category ?? 'unknown'}\nPRIMARY PESTLE DIMENSIONS TO CHECK: ${primaryDimensions}\n\n## Companies to Evaluate\n${companiesBlock}`;
+
+      try {
+        const message = await this.anthropic.messages.create({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 2048,
+          system: promotionPrompt,
+          messages: [{ role: 'user', content: userMessage }],
+        });
+
+        const textBlock = message.content.find(b => b.type === 'text');
+        if (!textBlock?.text) {
+          log.warn({ batchStart: i }, 'No text response from promotion evaluation');
+          continue;
+        }
+
+        const cleaned = textBlock.text.replace(/```json\n?|\n?```/g, '').trim();
+        const evaluations = JSON.parse(cleaned) as Array<{
+          companyIndex: number;
+          affected: boolean;
+          confidence: number;
+          pestleDimension: string;
+          reasoning: string;
+        }>;
+
+        if (!Array.isArray(evaluations)) continue;
+
+        for (const evaluation of evaluations) {
+          if (!evaluation.affected || evaluation.confidence < 0.5) continue;
+          if (evaluation.companyIndex < 0 || evaluation.companyIndex >= batch.length) continue;
+
+          promotedCompanies.push({
+            company: batch[evaluation.companyIndex],
+            confidence: Math.max(0, Math.min(1, evaluation.confidence)),
+            pestleDimension: evaluation.pestleDimension,
+            reasoning: evaluation.reasoning,
+          });
+        }
+      } catch (error) {
+        log.error({ error, batchStart: i }, 'Failed to evaluate company batch');
+      }
+    }
+
+    if (promotedCompanies.length === 0) {
+      log.info('No companies matched signal after LLM evaluation');
       return;
     }
 
-    log.info({ matchCount: matchingCompanies.length }, 'Promoting companies to active_segment');
+    log.info({ matchCount: promotedCompanies.length }, 'Promoting companies to active_segment via PESTLE evaluation');
 
-    // Promote matching companies
-    for (const company of matchingCompanies) {
+    // Promote matched companies
+    for (const { company, confidence, pestleDimension, reasoning } of promotedCompanies) {
       await db
         .update(schema.companies)
         .set({
@@ -289,17 +400,23 @@ export class MarketSignalProcessor {
         })
         .where(eq(schema.companies.id, company.id));
 
-      // Create a company_signal record linking this market signal to the company
+      // Create company_signal record with LLM evidence
       await db
         .insert(schema.companySignals)
         .values({
           companyId: company.id,
           clientId,
           signalType: 'market_signal',
-          signalStrength: String(Math.max(0, Math.min(1, relevanceScore ?? 0.70)).toFixed(2)),
+          signalStrength: String(Math.max(0, Math.min(1, (relevanceScore ?? 0.7) * confidence)).toFixed(2)),
           signalData: {
-            evidence: `Promoted by market signal: ${signalId}`,
-            details: { marketSignalId: signalId, hypothesisId },
+            evidence: reasoning,
+            details: {
+              marketSignalId: signalId,
+              hypothesisId,
+              pestleDimension,
+              confidence,
+              signalHeadline: signalContext?.headline,
+            },
           },
           source: 'market_signal_processor',
           expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days
@@ -307,7 +424,7 @@ export class MarketSignalProcessor {
     }
 
     // Recalculate signal scores for promoted companies
-    for (const company of matchingCompanies) {
+    for (const { company } of promotedCompanies) {
       const signals = await db
         .select()
         .from(schema.companySignals)

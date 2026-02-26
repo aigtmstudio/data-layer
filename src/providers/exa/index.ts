@@ -117,6 +117,30 @@ export class ExaProvider extends BaseProvider implements DataProvider {
       };
     }
   }
+
+  /**
+   * Search for news articles. Separate from searchCompanies() to avoid
+   * breaking the DataProvider interface (which returns UnifiedCompany[]).
+   */
+  async searchNews(params: {
+    query: string;
+    numResults?: number;
+    startPublishedDate?: string;
+  }): Promise<ExaSearchResponse> {
+    const body: Record<string, unknown> = {
+      query: params.query,
+      numResults: params.numResults ?? 5,
+      type: 'auto',
+      category: 'news',
+      contents: {
+        text: { maxCharacters: 2000 },
+      },
+    };
+    if (params.startPublishedDate) {
+      body.startPublishedDate = params.startPublishedDate;
+    }
+    return this.request<ExaSearchResponse>('post', '/search', { body });
+  }
 }
 
 function buildSearchQuery(params: CompanySearchParams): string {

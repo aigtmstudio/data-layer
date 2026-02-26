@@ -348,6 +348,168 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       });
   });
 
+  // POST /api/lists/:id/deep-enrich — scrape websites and generate PESTLE profiles
+  app.post<{ Params: { id: string } }>('/:id/deep-enrich', async (request, reply) => {
+    const db = getDb();
+    const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
+    if (!list) {
+      return reply.status(404).send({ error: 'List not found' });
+    }
+    if (!opts.container.deepEnrichmentService) {
+      return reply.status(503).send({ error: 'Deep enrichment not configured (missing Jina API key)' });
+    }
+
+    // Get company IDs from list members
+    const members = await db
+      .select({ companyId: schema.listMembers.companyId })
+      .from(schema.listMembers)
+      .where(and(
+        eq(schema.listMembers.listId, list.id),
+        isNull(schema.listMembers.removedAt),
+      ));
+
+    const companyIds = members.map(m => m.companyId).filter((id): id is string => id != null);
+    if (companyIds.length === 0) {
+      return reply.status(400).send({ error: 'List has no company members' });
+    }
+
+    // Create a job
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
+        clientId: list.clientId,
+        type: 'deep_enrichment',
+        status: 'running',
+        input: { listId: list.id, companyCount: companyIds.length },
+      })
+      .returning();
+
+    reply.status(202).send({ data: { jobId: job.id } });
+
+    opts.container.deepEnrichmentService
+      .enrichBatch(list.clientId, companyIds, { jobId: job.id })
+      .then(async (result) => {
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'completed',
+            processedItems: result.profiled,
+            output: result as unknown as Record<string, unknown>,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
+      })
+      .catch(async (error) => {
+        logger.error({ error, listId: list.id, jobId: job.id }, 'Deep enrichment failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            updatedAt: new Date(),
+            errors: [{ item: list.id, error: String(error), timestamp: new Date().toISOString() }],
+          })
+          .where(eq(schema.jobs.id, job.id));
+      });
+  });
+
+  // POST /api/lists/:id/apply-market-signals — full pipeline: deep-enrich → search evidence → classify + promote
+  app.post<{ Params: { id: string } }>('/:id/apply-market-signals', async (request, reply) => {
+    const db = getDb();
+    const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
+    if (!list) {
+      return reply.status(404).send({ error: 'List not found' });
+    }
+
+    // Get company IDs from list members
+    const members = await db
+      .select({ companyId: schema.listMembers.companyId })
+      .from(schema.listMembers)
+      .where(and(
+        eq(schema.listMembers.listId, list.id),
+        isNull(schema.listMembers.removedAt),
+      ));
+
+    const companyIds = members.map(m => m.companyId).filter((id): id is string => id != null);
+    if (companyIds.length === 0) {
+      return reply.status(400).send({ error: 'List has no company members' });
+    }
+
+    // Create a job to track the composite pipeline
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
+        clientId: list.clientId,
+        type: 'market_signal_search',
+        status: 'running',
+        input: { listId: list.id, pipeline: 'apply_market_signals' },
+      })
+      .returning();
+
+    reply.status(202).send({ data: { jobId: job.id } });
+
+    // Run the full pipeline in background
+    (async () => {
+      const log = logger.child({ listId: list.id, jobId: job.id });
+      const output: Record<string, unknown> = {};
+
+      try {
+        // Step 1: Deep enrich unprofiled companies
+        if (opts.container.deepEnrichmentService) {
+          log.info('Step 1/3: Deep enrichment');
+          const enrichResult = await opts.container.deepEnrichmentService.enrichBatch(
+            list.clientId, companyIds, { jobId: job.id },
+          );
+          output.enrichment = enrichResult;
+          log.info(enrichResult, 'Deep enrichment complete');
+        } else {
+          output.enrichment = { skipped: true, reason: 'No Jina API key configured' };
+        }
+
+        // Step 2: Search for evidence from active hypotheses
+        if (opts.container.marketSignalSearcher) {
+          log.info('Step 2/3: Evidence search');
+          const searchResult = await opts.container.marketSignalSearcher.searchForEvidence(list.clientId);
+          output.evidenceSearch = searchResult;
+          log.info(searchResult, 'Evidence search complete');
+        } else {
+          output.evidenceSearch = { skipped: true, reason: 'No search providers configured' };
+        }
+
+        // Step 3: Classify unprocessed signals + promote matching companies
+        log.info('Step 3/3: Signal classification + promotion');
+        const processedCount = await opts.container.marketSignalProcessor.processUnclassifiedSignals(list.clientId);
+        output.classification = { processedCount };
+        log.info({ processedCount }, 'Signal classification complete');
+
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'completed',
+            output,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
+
+        log.info(output, 'Apply market signals pipeline complete');
+      } catch (error) {
+        log.error({ error }, 'Apply market signals pipeline failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            output,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+            errors: [{ item: list.id, error: String(error), timestamp: new Date().toISOString() }],
+          })
+          .where(eq(schema.jobs.id, job.id));
+      }
+    })();
+  });
+
   // POST /api/lists/:id/signals/company — trigger company-level signal detection
   app.post<{ Params: { id: string } }>('/:id/signals/company', async (request, reply) => {
     const db = getDb();

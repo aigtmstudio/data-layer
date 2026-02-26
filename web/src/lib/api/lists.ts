@@ -135,3 +135,13 @@ export async function runPersonaSignals(id: string): Promise<{ jobId: string }> 
   const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/signals/persona`);
   return res.data;
 }
+
+export async function deepEnrich(id: string): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/deep-enrich`);
+  return res.data;
+}
+
+export async function applyMarketSignals(id: string): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/apply-market-signals`);
+  return res.data;
+}

@@ -4,7 +4,7 @@ import { use, useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, listKeys } from '@/lib/hooks/use-lists';
+import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, listKeys } from '@/lib/hooks/use-lists';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { useAppStore } from '@/lib/store';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
@@ -36,7 +36,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
-import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -316,6 +316,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const buildList = useBuildList();
   const buildContacts = useBuildContacts();
   const runPersonaSignals = useRunPersonaSignals();
+  const applyMarketSignals = useApplyMarketSignals();
 
   const isContactList = list?.type === 'contact';
 
@@ -333,6 +334,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [buyingCommitteeOpen, setBuyingCommitteeOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
   const [contactListName, setContactListName] = useState('');
+  const [applyingSignals, setApplyingSignals] = useState(false);
 
   // Poll build status and show toast on completion
   useEffect(() => {
@@ -431,6 +433,17 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       toast.success('Persona signal detection started');
     } catch {
       toast.error('Failed to start persona signal detection');
+    }
+  };
+
+  const handleApplyMarketSignals = async () => {
+    try {
+      setApplyingSignals(true);
+      await applyMarketSignals.mutateAsync(id);
+      toast.success('Applying market signals — enriching profiles, searching for evidence, and classifying...');
+    } catch {
+      toast.error('Failed to apply market signals');
+      setApplyingSignals(false);
     }
   };
 
@@ -620,6 +633,14 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
           )}
           {hasMembers && (
             <>
+              <Button
+                onClick={handleApplyMarketSignals}
+                disabled={applyMarketSignals.isPending || applyingSignals}
+                variant="default"
+              >
+                <Radar className="mr-2 h-4 w-4" />
+                {applyMarketSignals.isPending || applyingSignals ? 'Applying...' : 'Apply Market Signals'}
+              </Button>
               <Button variant="outline" onClick={openScheduleDialog}>
                 <Clock className="mr-2 h-4 w-4" />
                 Schedule
@@ -724,6 +745,16 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             {selectedStage === 'all' ? 'All Members' : `${STAGE_CONFIG[selectedStage]?.label ?? selectedStage} Members`}
           </h2>
           <div className="flex gap-2">
+            {selectedStage === 'tam' && (funnel?.stages?.tam ?? 0) > 0 && (
+              <Button
+                onClick={handleApplyMarketSignals}
+                disabled={applyMarketSignals.isPending || applyingSignals}
+                size="sm"
+              >
+                <Radar className="mr-2 h-4 w-4" />
+                {applyMarketSignals.isPending || applyingSignals ? 'Applying...' : 'Apply Market Signals'}
+              </Button>
+            )}
             {selectedStage === 'active_segment' && activeCount > 0 && (
               <Button
                 onClick={handleRunCompanySignals}

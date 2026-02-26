@@ -197,7 +197,9 @@ export type JobType =
   | 'market_signal_processing'
   | 'company_signals'
   | 'contact_list_build'
-  | 'persona_signal_detection';
+  | 'persona_signal_detection'
+  | 'deep_enrichment'
+  | 'market_signal_search';
 
 export interface Job {
   id: string;

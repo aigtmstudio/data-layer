@@ -39,6 +39,8 @@ export const companies = pgTable('companies', {
 
   logoUrl: text('logo_url'),
   description: text('description'),
+  websiteProfile: text('website_profile'),
+  websiteProfiledAt: timestamp('website_profiled_at', { withTimezone: true }),
   phone: text('phone'),
 
   sources: jsonb('sources').$type<SourceRecord[]>().notNull().default([]),

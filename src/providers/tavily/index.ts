@@ -150,6 +150,24 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
       };
     }
   }
+
+  /**
+   * Search for news articles. Separate from searchCompanies() to avoid
+   * breaking the DataProvider interface.
+   */
+  async searchNews(params: {
+    query: string;
+    maxResults?: number;
+  }): Promise<TavilySearchResponse> {
+    const body: Record<string, unknown> = {
+      query: params.query,
+      max_results: params.maxResults ?? 5,
+      search_depth: 'basic',
+      topic: 'news',
+      include_raw_content: false,
+    };
+    return this.request<TavilySearchResponse>('post', '/search', { body });
+  }
 }
 
 function buildSearchQuery(params: CompanySearchParams): string {

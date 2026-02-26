@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store';
 import { useHypotheses, useGenerateHypotheses, useUpdateHypothesis, useDeleteHypothesis } from '@/lib/hooks/use-hypotheses';
-import { useMarketSignals, useProcessSignals } from '@/lib/hooks/use-market-signals';
+import { useMarketSignals, useProcessSignals, useSearchEvidence } from '@/lib/hooks/use-market-signals';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { DataTable } from '@/components/shared/data-table';
 import { EmptyState } from '@/components/shared/empty-state';
@@ -31,7 +31,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatRelativeTime } from '@/lib/utils';
-import { Radio, RefreshCw, ExternalLink, Sparkles, MoreHorizontal, Pause, PlayCircle, Trash2, Building, UserCircle } from 'lucide-react';
+import { Radio, RefreshCw, ExternalLink, Sparkles, MoreHorizontal, Pause, PlayCircle, Trash2, Building, UserCircle, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -228,6 +228,7 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
   const [processedFilter, setProcessedFilter] = useState<string>('all');
   const [selectedSignal, setSelectedSignal] = useState<MarketSignal | null>(null);
   const processSignals = useProcessSignals();
+  const searchEvidence = useSearchEvidence();
 
   const { data, isLoading, isError, refetch } = useMarketSignals(clientId, {
     category: categoryFilter !== 'all' ? categoryFilter : undefined,
@@ -241,6 +242,15 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
       toast.success('Signal processing started');
     } catch {
       toast.error('Failed to process signals');
+    }
+  };
+
+  const handleSearchEvidence = async () => {
+    try {
+      await searchEvidence.mutateAsync({ clientId });
+      toast.success('Searching for evidence from active hypotheses...');
+    } catch {
+      toast.error('Failed to search for evidence');
     }
   };
 
@@ -306,10 +316,16 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-base font-semibold">Detected Signals</h3>
-        <Button onClick={handleProcess} disabled={processSignals.isPending} size="sm" variant="outline">
-          <RefreshCw className={`mr-2 h-4 w-4 ${processSignals.isPending ? 'animate-spin' : ''}`} />
-          {processSignals.isPending ? 'Processing...' : 'Process Signals'}
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={handleSearchEvidence} disabled={searchEvidence.isPending} size="sm">
+            <Search className={`mr-2 h-4 w-4`} />
+            {searchEvidence.isPending ? 'Searching...' : 'Search for Evidence'}
+          </Button>
+          <Button onClick={handleProcess} disabled={processSignals.isPending} size="sm" variant="outline">
+            <RefreshCw className={`mr-2 h-4 w-4 ${processSignals.isPending ? 'animate-spin' : ''}`} />
+            {processSignals.isPending ? 'Processing...' : 'Process Signals'}
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">

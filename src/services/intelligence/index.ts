@@ -17,3 +17,7 @@ export { MarketSignalProcessor } from './market-signal-processor.js';
 export type { IngestSignalInput, SignalFeedOptions } from './market-signal-processor.js';
 export { PersonaSignalDetector } from './persona-signal-detector.js';
 export type { PersonaSignalResult } from './persona-signal-detector.js';
+export { DeepEnrichmentService } from './deep-enrichment.js';
+export type { EnrichBatchResult } from './deep-enrichment.js';
+export { MarketSignalSearcher } from './market-signal-searcher.js';
+export type { EvidenceSearchResult } from './market-signal-searcher.js';

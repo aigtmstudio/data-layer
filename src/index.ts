@@ -20,6 +20,8 @@ import {
   HypothesisGenerator,
   MarketSignalProcessor,
   PersonaSignalDetector,
+  DeepEnrichmentService,
+  MarketSignalSearcher,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -34,6 +36,7 @@ import { BrowserbaseProvider } from './providers/browserbase/index.js';
 import { AgentQlProvider } from './providers/agentql/index.js';
 import { FirecrawlProvider } from './providers/firecrawl/index.js';
 import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
+import { JinaProvider } from './providers/jina/index.js';
 import { CompanyDiscoveryService } from './services/company-discovery/index.js';
 import { PromptConfigService } from './services/prompt-config/index.js';
 import { logger } from './lib/logger.js';
@@ -59,6 +62,9 @@ export interface ServiceContainer {
   hypothesisGenerator: HypothesisGenerator;
   marketSignalProcessor: MarketSignalProcessor;
   personaSignalDetector: PersonaSignalDetector;
+  // Deep enrichment + evidence search (optional — depend on provider API keys)
+  deepEnrichmentService?: DeepEnrichmentService;
+  marketSignalSearcher?: MarketSignalSearcher;
 }
 
 let container: ServiceContainer;
@@ -82,19 +88,24 @@ async function main() {
   const creditManager = new CreditManager();
   const orchestrator = new SourceOrchestrator(creditManager);
 
-  // Register providers (ordered by priority — cheapest first)
+  // Instantiate providers (shared across orchestrator + signal services)
+  const exaProvider = config.exaApiKey ? new ExaProvider(config.exaApiKey) : undefined;
+  const tavilyProvider = config.tavilyApiKey ? new TavilyProvider(config.tavilyApiKey) : undefined;
+  const firecrawlProvider = config.firecrawlApiKey ? new FirecrawlProvider(config.firecrawlApiKey) : undefined;
+
+  // Register providers with orchestrator (ordered by priority — cheapest first)
   orchestrator.registerProvider(new ApolloProvider(config.apolloApiKey), 1);
   orchestrator.registerProvider(new LeadMagicProvider(config.leadmagicApiKey), 2);
   orchestrator.registerProvider(new ProspeoProvider(config.prospeoApiKey), 3);
-  if (config.exaApiKey) orchestrator.registerProvider(new ExaProvider(config.exaApiKey), 4);
-  if (config.tavilyApiKey) orchestrator.registerProvider(new TavilyProvider(config.tavilyApiKey), 5);
+  if (exaProvider) orchestrator.registerProvider(exaProvider, 4);
+  if (tavilyProvider) orchestrator.registerProvider(tavilyProvider, 5);
   if (config.apifyApiKey) orchestrator.registerProvider(new ApifyProvider(config.apifyApiKey), 6);
   if (config.parallelApiKey) orchestrator.registerProvider(new ParallelProvider(config.parallelApiKey), 7);
   if (config.valyuApiKey) orchestrator.registerProvider(new ValyuProvider(config.valyuApiKey), 8);
   if (config.diffbotApiKey) orchestrator.registerProvider(new DiffbotProvider(config.diffbotApiKey), 9);
   if (config.browserbaseApiKey && config.browserbaseProjectId) orchestrator.registerProvider(new BrowserbaseProvider(config.browserbaseApiKey, config.browserbaseProjectId), 10);
   if (config.agentqlApiKey) orchestrator.registerProvider(new AgentQlProvider(config.agentqlApiKey), 11);
-  if (config.firecrawlApiKey) orchestrator.registerProvider(new FirecrawlProvider(config.firecrawlApiKey), 12);
+  if (firecrawlProvider) orchestrator.registerProvider(firecrawlProvider, 12);
   if (config.scrapegraphApiKey) orchestrator.registerProvider(new ScrapeGraphProvider(config.scrapegraphApiKey), 13);
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
@@ -141,6 +152,26 @@ async function main() {
   // Wire persona signal detector into list builder
   listBuilder.setPersonaSignalDetector(personaSignalDetector);
 
+  // Deep enrichment + evidence search (optional, depend on API keys)
+  let deepEnrichmentService: DeepEnrichmentService | undefined;
+  let marketSignalSearcher: MarketSignalSearcher | undefined;
+
+  if (config.jinaApiKey) {
+    const jinaProvider = new JinaProvider(config.jinaApiKey);
+    deepEnrichmentService = new DeepEnrichmentService(config.anthropicApiKey, jinaProvider, firecrawlProvider);
+    deepEnrichmentService.setPromptConfig(promptConfigService);
+    logger.info('Deep enrichment service initialized (Jina primary, Firecrawl fallback)');
+  }
+
+  if (exaProvider || tavilyProvider) {
+    marketSignalSearcher = new MarketSignalSearcher(
+      config.anthropicApiKey, marketSignalProcessor,
+      { exa: exaProvider, tavily: tavilyProvider },
+    );
+    marketSignalSearcher.setPromptConfig(promptConfigService);
+    logger.info({ exa: !!exaProvider, tavily: !!tavilyProvider }, 'Market signal searcher initialized');
+  }
+
   // 4. Store in container
   container = {
     creditManager,
@@ -161,6 +192,8 @@ async function main() {
     hypothesisGenerator,
     marketSignalProcessor,
     personaSignalDetector,
+    deepEnrichmentService,
+    marketSignalSearcher,
   };
 
   // 5. Start scheduler with handlers

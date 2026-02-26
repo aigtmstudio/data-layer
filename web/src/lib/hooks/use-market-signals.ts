@@ -42,3 +42,14 @@ export function useProcessSignals() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['market-signals'] }),
   });
 }
+
+export function useSearchEvidence() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: signalsApi.searchEvidence,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['market-signals'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+    },
+  });
+}

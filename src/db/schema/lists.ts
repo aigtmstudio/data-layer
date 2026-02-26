@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, timestamp, jsonb, integer, boolean, numeric, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, jsonb, integer, boolean, numeric, index, uniqueIndex } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { clients } from './clients.js';
 import { icps } from './icps.js';
 import { personas } from './personas.js';
@@ -62,4 +63,10 @@ export const listMembers = pgTable('list_members', {
   index('idx_list_members_list').on(table.listId),
   index('idx_list_members_company').on(table.companyId),
   index('idx_list_members_contact').on(table.contactId),
+  uniqueIndex('idx_list_members_list_company_unique')
+    .on(table.listId, table.companyId)
+    .where(sql`removed_at IS NULL AND company_id IS NOT NULL`),
+  uniqueIndex('idx_list_members_list_contact_unique')
+    .on(table.listId, table.contactId)
+    .where(sql`removed_at IS NULL AND contact_id IS NOT NULL`),
 ]);

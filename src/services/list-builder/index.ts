@@ -1,5 +1,5 @@
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, or, inArray, ilike, isNull } from 'drizzle-orm';
+import { eq, and, or, inArray, ilike, isNull, sql } from 'drizzle-orm';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import type { IcpFilters } from '../../db/schema/icps.js';
 import type { SourceRecord } from '../../db/schema/companies.js';
@@ -75,13 +75,33 @@ export class ListBuilder {
       );
     }
 
+    // Skip companies already in the list (prevents duplicates on re-build)
+    const existingMembers = await db
+      .select({ companyId: schema.listMembers.companyId })
+      .from(schema.listMembers)
+      .where(and(
+        eq(schema.listMembers.listId, params.listId),
+        isNull(schema.listMembers.removedAt),
+      ));
+    const existingCompanyIds = new Set(existingMembers.map(m => m.companyId).filter(Boolean));
+    const candidates = existingCompanyIds.size > 0
+      ? validCompanies.filter(c => !existingCompanyIds.has(c.id))
+      : validCompanies;
+
+    if (existingCompanyIds.size > 0) {
+      logger.info(
+        { existing: existingCompanyIds.size, newCandidates: candidates.length },
+        'Skipped companies already in list',
+      );
+    }
+
     logger.info(
-      { listId: params.listId, candidateCount: validCompanies.length },
+      { listId: params.listId, candidateCount: candidates.length },
       'Companies loaded from DB for scoring',
     );
 
     // Score each company
-    const allScored = validCompanies.map(c => {
+    const allScored = candidates.map(c => {
       const companyData: UnifiedCompany = {
         name: c.name,
         domain: c.domain ?? undefined,
@@ -310,13 +330,25 @@ export class ListBuilder {
       }
     }
 
+    // Count actual active members (includes pre-existing + newly added)
+    const [{ companyTotal, contactTotal }] = await db
+      .select({
+        companyTotal: sql<number>`count(distinct company_id) filter (where company_id is not null)::int`,
+        contactTotal: sql<number>`count(distinct contact_id) filter (where contact_id is not null)::int`,
+      })
+      .from(schema.listMembers)
+      .where(and(
+        eq(schema.listMembers.listId, params.listId),
+        isNull(schema.listMembers.removedAt),
+      ));
+
     // Update list stats
     await db
       .update(schema.lists)
       .set({
-        companyCount: finalScored.length,
-        contactCount: contactsAdded,
-        memberCount: finalScored.length + contactsAdded,
+        companyCount: companyTotal,
+        contactCount: contactTotal,
+        memberCount: companyTotal + contactTotal,
         filterSnapshot: {
           icpFilters: filters as unknown as Record<string, unknown>,
           personaFilters: persona ? {

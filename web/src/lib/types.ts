@@ -288,6 +288,7 @@ export interface ListMember {
   companyName?: string | null;
   companyDomain?: string | null;
   companyIndustry?: string | null;
+  companySource?: string | null;
   pipelineStage?: PipelineStage | null;
   contactName?: string | null;
   contactTitle?: string | null;

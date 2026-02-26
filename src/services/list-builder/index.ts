@@ -12,6 +12,7 @@ import type { PersonaSignalDetector } from '../intelligence/persona-signal-detec
 import type { EmploymentRecord } from '../../db/schema/contacts.js';
 import { NotFoundError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
+import { isBlockedDomain } from '../company-discovery/index.js';
 
 export class ListBuilder {
   private discoveryService?: CompanyDiscoveryService;
@@ -65,13 +66,22 @@ export class ListBuilder {
       .where(eq(schema.companies.clientId, params.clientId))
       .limit((params.limit ?? 1000) * 3); // Over-fetch so scorer has enough to filter
 
+    // Filter out companies with blocked domains (social/platform sites)
+    const validCompanies = matchingCompanies.filter(c => !isBlockedDomain(c.domain ?? undefined));
+    if (validCompanies.length < matchingCompanies.length) {
+      logger.info(
+        { blocked: matchingCompanies.length - validCompanies.length },
+        'Filtered out companies with blocked domains during list build',
+      );
+    }
+
     logger.info(
-      { listId: params.listId, candidateCount: matchingCompanies.length },
+      { listId: params.listId, candidateCount: validCompanies.length },
       'Companies loaded from DB for scoring',
     );
 
     // Score each company
-    const allScored = matchingCompanies.map(c => {
+    const allScored = validCompanies.map(c => {
       const companyData: UnifiedCompany = {
         name: c.name,
         domain: c.domain ?? undefined,

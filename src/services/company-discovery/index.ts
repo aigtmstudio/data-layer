@@ -43,7 +43,7 @@ const BLOCKED_DOMAINS = new Set([
   'google.com',
 ]);
 
-function isBlockedDomain(domain: string | undefined): boolean {
+export function isBlockedDomain(domain: string | undefined): boolean {
   if (!domain) return false;
   const lower = domain.toLowerCase().replace(/^www\./, '');
   // Check exact match and parent domain (e.g. "en.wikipedia.org" → "wikipedia.org")
@@ -53,7 +53,51 @@ function isBlockedDomain(domain: string | undefined): boolean {
     const parent = parts.slice(-2).join('.');
     if (BLOCKED_DOMAINS.has(parent)) return true;
   }
+  // Also block country-specific variants (glassdoor.co.uk, yelp.co.uk, etc.)
+  if (parts.length > 2) {
+    const baseName = parts.slice(0, -2).join('.');
+    const parentDomain = baseName.split('.').pop();
+    if (parentDomain && BLOCKED_DOMAINS.has(parentDomain + '.com')) return true;
+  }
   return false;
+}
+
+/**
+ * Filter out results that aren't actual companies.
+ * Exa (web search) sometimes returns directory pages, review aggregators,
+ * industry association pages, or generic list pages.
+ */
+const NON_COMPANY_PATTERNS = [
+  /^companies\b/i,           // "Companies & Reviews", "Companies in..."
+  /\bcompanies\s+(in|&|and)\b/i,
+  /\b(review|rating)s?\b/i,  // Review/rating aggregator pages
+  /\blist\s+of\b/i,          // "List of restaurants in..."
+  /\btop\s+\d+\b/i,          // "Top 10 hospitality..."
+  /\bbest\s+\d+\b/i,         // "Best 50 restaurants..."
+  /\bdirectory\b/i,          // Directories
+  /\bassociation\b/i,        // Industry associations
+  /\bfederation\b/i,         // Industry federations
+  /\bcouncil\b/i,            // Industry councils (not companies)
+  /\bawards?\b/i,            // "Restaurant & Bar Design Awards"
+  /\bjobs?\s+(in|at|for)\b/i, // Job listing pages
+  /\bcareers?\s+(in|at)\b/i,
+];
+
+function isPlausibleCompany(company: UnifiedCompany): boolean {
+  // Companies without domains are suspicious but might be from AI discovery
+  if (!company.domain && !company.name) return false;
+
+  const name = company.name ?? '';
+
+  // Check if the name looks like a non-company result
+  for (const pattern of NON_COMPANY_PATTERNS) {
+    if (pattern.test(name)) {
+      logger.debug({ name, domain: company.domain }, 'Filtered non-company result');
+      return false;
+    }
+  }
+
+  return true;
 }
 
 export interface DiscoveryResult {
@@ -254,7 +298,16 @@ export class CompanyDiscoveryService {
       };
     }
 
-    // 4. Apply ICP exclusion filters
+    // 4. Filter out non-company results (directories, review sites, associations)
+    {
+      const before = companies.length;
+      companies = companies.filter(c => isPlausibleCompany(c));
+      if (before > companies.length) {
+        logger.info({ filtered: before - companies.length }, 'Filtered non-company results');
+      }
+    }
+
+    // 5. Apply ICP exclusion filters
     const excludedDomains = new Set(
       (filters.excludeDomains ?? []).map(d => d.toLowerCase().replace(/^www\./, '')),
     );
@@ -283,10 +336,62 @@ export class CompanyDiscoveryService {
       }
     }
 
-    // 5. Deduplicate against existing DB companies
+    // 6. Enrich sparse companies BEFORE upsert so DB gets enriched data.
+    // Companies from Exa only have name + domain — enrich via Apollo to get
+    // industry, employee count, country etc. for proper scoring and display.
+    const sparseCompanies = companies.filter(c =>
+      c.domain && !c.industry && !c.employeeCount && !c.country,
+    );
+    if (sparseCompanies.length > 0) {
+      const enrichLimit = Math.min(sparseCompanies.length, limit);
+      logger.info(
+        { sparse: sparseCompanies.length, enriching: enrichLimit },
+        'Enriching sparse companies before upsert',
+      );
+
+      if (params.jobId) {
+        await db
+          .update(schema.jobs)
+          .set({ output: { phase: 'enriching_sparse', sparseCount: sparseCompanies.length, warnings }, updatedAt: new Date() })
+          .where(eq(schema.jobs.id, params.jobId));
+      }
+
+      let enriched = 0;
+      for (const company of sparseCompanies.slice(0, enrichLimit)) {
+        try {
+          const { result: enrichedData, providersUsed: enrichProviders } = await this.orchestrator.enrichCompany(
+            params.clientId,
+            { domain: company.domain, name: company.name },
+          );
+          if (enrichedData) {
+            if (enrichedData.name && !company.externalIds.exa) company.name = enrichedData.name;
+            if (enrichedData.industry && !company.industry) company.industry = enrichedData.industry;
+            if (enrichedData.employeeCount && !company.employeeCount) company.employeeCount = enrichedData.employeeCount;
+            if (enrichedData.country && !company.country) company.country = enrichedData.country;
+            if (enrichedData.annualRevenue && !company.annualRevenue) company.annualRevenue = enrichedData.annualRevenue;
+            if (enrichedData.foundedYear && !company.foundedYear) company.foundedYear = enrichedData.foundedYear;
+            if (enrichedData.latestFundingStage && !company.latestFundingStage) company.latestFundingStage = enrichedData.latestFundingStage;
+            if (enrichedData.techStack?.length && !company.techStack?.length) company.techStack = enrichedData.techStack;
+            if (enrichedData.employeeRange && !company.employeeRange) company.employeeRange = enrichedData.employeeRange;
+            if (enrichedData.description && !company.description) company.description = enrichedData.description;
+            if (enrichedData.city && !company.city) company.city = enrichedData.city;
+            if (enrichedData.state && !company.state) company.state = enrichedData.state;
+            if (enrichedData.linkedinUrl && !company.linkedinUrl) company.linkedinUrl = enrichedData.linkedinUrl;
+            // Merge externalIds from enrichment provider
+            Object.assign(company.externalIds, enrichedData.externalIds);
+            enriched++;
+          }
+        } catch (err) {
+          logger.debug({ domain: company.domain, error: err }, 'Failed to enrich sparse company');
+        }
+      }
+
+      logger.info({ enriched, attempted: enrichLimit }, 'Sparse company enrichment complete');
+    }
+
+    // 7. Deduplicate against existing DB companies
     const existingDomains = new Set<string>();
     if (companies.some(c => c.domain)) {
-      const domains = companies.map(c => c.domain?.toLowerCase()).filter(Boolean) as string[];
       const existing = await db
         .select({ domain: schema.companies.domain })
         .from(schema.companies)
@@ -297,7 +402,7 @@ export class CompanyDiscoveryService {
     }
 
     const newCompanies = companies.filter(c => {
-      if (!c.domain) return true; // Keep companies without domains (will get a new DB record)
+      if (!c.domain) return true;
       return !existingDomains.has(c.domain.toLowerCase());
     });
 
@@ -314,10 +419,10 @@ export class CompanyDiscoveryService {
         .where(eq(schema.jobs.id, params.jobId));
     }
 
-    // 5. Upsert discovered companies into DB
+    // 8. Upsert discovered companies into DB (now with enriched data)
     let upserted = 0;
     for (const company of newCompanies) {
-      await this.upsertDiscoveredCompany(params.clientId, company, providersUsed);
+      await this.upsertDiscoveredCompany(params.clientId, company);
       upserted++;
 
       if (params.jobId && upserted % 10 === 0) {
@@ -328,58 +433,7 @@ export class CompanyDiscoveryService {
       }
     }
 
-    // 6. Enrich sparse companies before scoring
-    // Companies from providers like Exa only have name + domain — enrich them via
-    // Apollo/LeadMagic to get industry, employee count, country etc. for proper scoring
-    const sparseCompanies = companies.filter(c =>
-      c.domain && !c.industry && !c.employeeCount && !c.country,
-    );
-    if (sparseCompanies.length > 0) {
-      const enrichLimit = Math.min(sparseCompanies.length, limit); // Cap to prevent excessive API calls
-      logger.info(
-        { sparse: sparseCompanies.length, enriching: enrichLimit },
-        'Enriching sparse companies before scoring',
-      );
-
-      if (params.jobId) {
-        await db
-          .update(schema.jobs)
-          .set({ output: { phase: 'enriching_sparse', sparseCount: sparseCompanies.length, warnings }, updatedAt: new Date() })
-          .where(eq(schema.jobs.id, params.jobId));
-      }
-
-      let enriched = 0;
-      for (const company of sparseCompanies.slice(0, enrichLimit)) {
-        try {
-          const { result: enrichedData } = await this.orchestrator.enrichCompany(
-            params.clientId,
-            { domain: company.domain, name: company.name },
-          );
-          if (enrichedData) {
-            // Merge enriched data back into the company object
-            if (enrichedData.industry && !company.industry) company.industry = enrichedData.industry;
-            if (enrichedData.employeeCount && !company.employeeCount) company.employeeCount = enrichedData.employeeCount;
-            if (enrichedData.country && !company.country) company.country = enrichedData.country;
-            if (enrichedData.annualRevenue && !company.annualRevenue) company.annualRevenue = enrichedData.annualRevenue;
-            if (enrichedData.foundedYear && !company.foundedYear) company.foundedYear = enrichedData.foundedYear;
-            if (enrichedData.latestFundingStage && !company.latestFundingStage) company.latestFundingStage = enrichedData.latestFundingStage;
-            if (enrichedData.techStack?.length && !company.techStack?.length) company.techStack = enrichedData.techStack;
-            if (enrichedData.employeeRange && !company.employeeRange) company.employeeRange = enrichedData.employeeRange;
-            if (enrichedData.description && !company.description) company.description = enrichedData.description;
-            if (enrichedData.city && !company.city) company.city = enrichedData.city;
-            if (enrichedData.state && !company.state) company.state = enrichedData.state;
-            if (enrichedData.linkedinUrl && !company.linkedinUrl) company.linkedinUrl = enrichedData.linkedinUrl;
-            enriched++;
-          }
-        } catch (err) {
-          logger.debug({ domain: company.domain, error: err }, 'Failed to enrich sparse company');
-        }
-      }
-
-      logger.info({ enriched, attempted: enrichLimit }, 'Sparse company enrichment complete');
-    }
-
-    // 7. Score all discovered companies (new + existing)
+    // 9. Score all discovered companies (new + existing)
     // Note: these companies already matched provider search criteria so we use a low threshold
     const scoredCompanies = companies
       .map(c => ({ company: c, ...scoreCompanyFit(c, filters) }))
@@ -550,10 +604,16 @@ export class CompanyDiscoveryService {
   private async upsertDiscoveredCompany(
     clientId: string,
     data: UnifiedCompany,
-    providersUsed: string[],
   ): Promise<{ id: string }> {
     const db = getDb();
     const now = new Date();
+
+    // Infer which providers actually contributed data for THIS company
+    const companySources: string[] = [];
+    if (data.externalIds.apollo) companySources.push('apollo');
+    if (data.externalIds.exa) companySources.push('exa');
+    if (data.externalIds.leadmagic) companySources.push('leadmagic');
+    if (companySources.length === 0) companySources.push('ai_discovery');
 
     const dbFields = {
       name: data.name,
@@ -576,12 +636,12 @@ export class CompanyDiscoveryService {
       logoUrl: data.logoUrl,
       description: data.description,
       phone: data.phone,
-      sources: providersUsed.map(p => ({
+      sources: companySources.map(p => ({
         source: p,
         fetchedAt: now.toISOString(),
         fieldsProvided: [] as string[],
       })),
-      primarySource: providersUsed[0],
+      primarySource: companySources[0],
       apolloId: data.externalIds.apollo,
       leadmagicId: data.externalIds.leadmagic,
       updatedAt: now,

@@ -74,10 +74,17 @@ function StageBadge({ stage }: { stage: PipelineStage | null | undefined }) {
 
 // --- Company list column definitions ---
 
+const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
+  apollo: { label: 'Apollo', className: 'bg-blue-50 text-blue-700' },
+  exa: { label: 'Exa', className: 'bg-purple-50 text-purple-700' },
+  leadmagic: { label: 'LeadMagic', className: 'bg-teal-50 text-teal-700' },
+  ai_discovery: { label: 'AI', className: 'bg-amber-50 text-amber-700' },
+};
+
 const companyBaseColumns: ColumnDef<ListMember>[] = [
   {
     id: 'name',
-    header: 'Name',
+    header: 'Company',
     accessorFn: (row) => row.company?.name ?? row.companyName ?? '',
     cell: ({ row }) => row.original.company?.name ?? row.original.companyName ?? '-',
   },
@@ -92,6 +99,21 @@ const companyBaseColumns: ColumnDef<ListMember>[] = [
     header: 'Industry',
     accessorFn: (row) => row.companyIndustry ?? '',
     cell: ({ row }) => row.original.companyIndustry ?? '-',
+  },
+  {
+    id: 'source',
+    header: 'Source',
+    accessorFn: (row) => row.companySource ?? '',
+    cell: ({ row }) => {
+      const source = row.original.companySource;
+      if (!source) return <span className="text-muted-foreground text-xs">-</span>;
+      const config = SOURCE_LABELS[source] ?? { label: source, className: 'bg-gray-50 text-gray-600' };
+      return (
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${config.className}`}>
+          {config.label}
+        </span>
+      );
+    },
   },
 ];
 

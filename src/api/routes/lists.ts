@@ -172,6 +172,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           companyName: schema.companies.name,
           companyDomain: schema.companies.domain,
           companyIndustry: schema.companies.industry,
+          companySource: schema.companies.primarySource,
           pipelineStage: schema.companies.pipelineStage,
           contactName: schema.contacts.fullName,
           contactTitle: schema.contacts.title,

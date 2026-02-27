@@ -9,7 +9,7 @@ import {
   useReactTable,
   type SortingState,
 } from '@tanstack/react-table';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
   Table,
   TableBody,
@@ -26,6 +26,8 @@ interface DataTableProps<TData, TValue> {
   data: TData[];
   pageSize?: number;
   onRowClick?: (row: TData) => void;
+  renderSubRow?: (row: TData) => React.ReactNode | null;
+  getRowId?: (row: TData) => string;
 }
 
 export function DataTable<TData, TValue>({
@@ -33,8 +35,11 @@ export function DataTable<TData, TValue>({
   data,
   pageSize = 20,
   onRowClick,
+  renderSubRow,
+  getRowId,
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const table = useReactTable({
     data,
@@ -81,19 +86,43 @@ export function DataTable<TData, TValue>({
           </TableHeader>
           <TableBody>
             {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className={onRowClick ? 'cursor-pointer' : undefined}
-                  onClick={() => onRowClick?.(row.original)}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
+              table.getRowModel().rows.map((row) => {
+                const rowId = getRowId ? getRowId(row.original) : row.id;
+                const isExpanded = expandedRows.has(rowId);
+                const isClickable = !!onRowClick || !!renderSubRow;
+                const handleClick = () => {
+                  if (renderSubRow) {
+                    setExpandedRows(prev => {
+                      const next = new Set(prev);
+                      if (next.has(rowId)) next.delete(rowId);
+                      else next.add(rowId);
+                      return next;
+                    });
+                  }
+                  onRowClick?.(row.original);
+                };
+                return (
+                  <Fragment key={rowId}>
+                    <TableRow
+                      className={isClickable ? 'cursor-pointer hover:bg-muted/50' : undefined}
+                      onClick={handleClick}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {isExpanded && renderSubRow && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30">
+                        <TableCell colSpan={columns.length} className="p-0">
+                          {renderSubRow(row.original)}
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })
             ) : (
               <TableRow>
                 <TableCell colSpan={columns.length} className="h-24 text-center">

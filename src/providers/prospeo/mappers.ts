@@ -1,5 +1,5 @@
 import type { UnifiedContact } from '../types.js';
-import type { ProspeoPersonEnrichResponse, ProspeoSearchResponse } from './types.js';
+import type { ProspeoPersonEnrichResponse, ProspeoSearchPersonResponse } from './types.js';
 
 export function mapProspeoPersonEnrich(raw: ProspeoPersonEnrichResponse['response']): UnifiedContact {
   return {
@@ -22,19 +22,22 @@ export function mapProspeoPersonEnrich(raw: ProspeoPersonEnrichResponse['respons
   };
 }
 
-export function mapProspeoSearchResult(raw: ProspeoSearchResponse['response'][number]): UnifiedContact {
+export function mapProspeoSearchPersonResult(
+  raw: ProspeoSearchPersonResponse['results'][number],
+): UnifiedContact {
   return {
-    firstName: raw.first_name,
-    lastName: raw.last_name,
-    fullName: raw.full_name,
-    linkedinUrl: raw.linkedin_url,
-    title: raw.title,
-    seniority: raw.seniority,
-    companyName: raw.company_name,
-    companyDomain: raw.company_domain,
-    workEmail: raw.email,
-    city: raw.city,
-    country: raw.country,
-    externalIds: {},
+    firstName: raw.person.first_name,
+    lastName: raw.person.last_name,
+    fullName: raw.person.full_name,
+    linkedinUrl: raw.person.linkedin_url,
+    title: raw.person.current_job_title,
+    workEmail: raw.person.email ?? undefined,
+    phone: raw.person.mobile ?? undefined,
+    companyName: raw.company?.name,
+    companyDomain: raw.company?.domain,
+    city: raw.person.location?.city,
+    state: raw.person.location?.state,
+    country: raw.person.location?.country,
+    externalIds: raw.person.person_id ? { prospeo: raw.person.person_id } : {},
   };
 }

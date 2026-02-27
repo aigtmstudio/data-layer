@@ -40,25 +40,44 @@ export interface ProspeoPersonEnrichResponse {
   message?: string;
 }
 
-export interface ProspeoSearchResponse {
-  response: Array<{
-    first_name?: string;
-    last_name?: string;
-    full_name?: string;
-    linkedin_url?: string;
-    title?: string;
-    seniority?: string;
-    company_name?: string;
-    company_domain?: string;
-    email?: string;
-    city?: string;
-    country?: string;
+export interface ProspeoSearchPersonResponse {
+  results: Array<{
+    person: {
+      person_id?: string;
+      first_name?: string;
+      last_name?: string;
+      full_name?: string;
+      linkedin_url?: string;
+      current_job_title?: string;
+      headline?: string;
+      email?: string;
+      mobile?: string;
+      location?: {
+        country?: string;
+        country_code?: string;
+        state?: string;
+        city?: string;
+      };
+      job_history?: Array<{
+        title?: string;
+        company_name?: string;
+      }>;
+    };
+    company: {
+      company_id?: string;
+      name?: string;
+      website?: string;
+      domain?: string;
+      industry?: string;
+      employee_count?: number;
+    };
   }>;
   error: boolean;
+  error_code?: string;
   pagination?: {
-    total: number;
-    page: number;
+    current_page: number;
     per_page: number;
+    total_page: number;
+    total_count: number;
   };
-  message?: string;
 }

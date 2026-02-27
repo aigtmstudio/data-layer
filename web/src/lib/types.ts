@@ -291,6 +291,7 @@ export interface ListMember {
   companyDomain?: string | null;
   companyIndustry?: string | null;
   companySource?: string | null;
+  companyWebsiteProfile?: string | null;
   pipelineStage?: PipelineStage | null;
   contactName?: string | null;
   contactTitle?: string | null;
@@ -346,6 +347,36 @@ export interface SignalHypothesis {
   createdAt: string;
   updatedAt: string;
 }
+
+export interface CompanySignal {
+  id: string;
+  companyId: string;
+  clientId: string;
+  signalType: string;
+  signalStrength: string;
+  signalData: {
+    evidence: string;
+    details?: {
+      marketSignalId?: string;
+      hypothesisId?: string;
+      pestleDimension?: string;
+      confidence?: number;
+      signalHeadline?: string;
+    };
+  };
+  source: string;
+  detectedAt: string;
+  expiresAt: string;
+  marketSignal?: {
+    headline: string;
+    sourceUrl: string | null;
+    sourceName: string | null;
+    signalCategory: string | null;
+    summary: string | null;
+  } | null;
+}
+
+export type SignalStrengthTier = 'weak' | 'medium' | 'strong';
 
 export interface ContactSignal {
   id: string;

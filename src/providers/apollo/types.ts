@@ -86,3 +86,22 @@ export interface ApolloCompanySearchResponse {
 export interface ApolloPersonEnrichResponse {
   person: ApolloPerson;
 }
+
+export interface ApolloApiSearchResponse {
+  total_entries: number;
+  people: Array<{
+    id: string;
+    first_name?: string;
+    last_name_obfuscated?: string;
+    title?: string;
+    organization?: {
+      name?: string;
+    };
+  }>;
+}
+
+export interface ApolloBulkMatchResponse {
+  status: string;
+  matches: ApolloPerson[];
+  credits_consumed: number;
+}

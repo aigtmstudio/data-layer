@@ -24,6 +24,7 @@ export interface UnifiedCompany {
   techStack?: string[];
   logoUrl?: string;
   description?: string;
+  websiteProfile?: string;
   phone?: string;
   externalIds: Record<string, string>;
 }

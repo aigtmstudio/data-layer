@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
@@ -287,21 +287,22 @@ export class MarketSignalProcessor {
     const db = getDb();
     const log = logger.child({ clientId, signalId, segments: affectedSegments });
 
-    // Load all TAM companies for this client
+    // Load all TAM + active_segment companies for this client
+    // TAM companies may be promoted; active_segment companies accumulate additional signal records
     const tamCompanies = await db
       .select()
       .from(schema.companies)
       .where(and(
         eq(schema.companies.clientId, clientId),
-        eq(schema.companies.pipelineStage, 'tam'),
+        inArray(schema.companies.pipelineStage, ['tam', 'active_segment']),
       ));
 
     if (tamCompanies.length === 0) {
-      log.debug('No TAM companies to evaluate');
+      log.debug('No TAM/active companies to evaluate');
       return;
     }
 
-    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM companies against market signal');
+    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM/active companies against market signal');
 
     // Get promotion prompt
     let promotionPrompt = PROMOTION_PROMPT;
@@ -368,7 +369,7 @@ export class MarketSignalProcessor {
         if (!Array.isArray(evaluations)) continue;
 
         for (const evaluation of evaluations) {
-          if (!evaluation.affected || evaluation.confidence < 0.5) continue;
+          if (!evaluation.affected || evaluation.confidence < 0.7) continue;
           if (evaluation.companyIndex < 0 || evaluation.companyIndex >= batch.length) continue;
 
           promotedCompanies.push({
@@ -388,17 +389,20 @@ export class MarketSignalProcessor {
       return;
     }
 
-    log.info({ matchCount: promotedCompanies.length }, 'Promoting companies to active_segment via PESTLE evaluation');
+    log.info({ matchCount: promotedCompanies.length }, 'Applying market signal evidence to companies via PESTLE evaluation');
 
-    // Promote matched companies
+    // Promote matched companies (or add signal records to already-active ones)
     for (const { company, confidence, pestleDimension, reasoning } of promotedCompanies) {
-      await db
-        .update(schema.companies)
-        .set({
-          pipelineStage: 'active_segment',
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.companies.id, company.id));
+      // Only update stage if company is still in TAM
+      if (company.pipelineStage === 'tam') {
+        await db
+          .update(schema.companies)
+          .set({
+            pipelineStage: 'active_segment',
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.companies.id, company.id));
+      }
 
       // Create company_signal record with LLM evidence
       await db

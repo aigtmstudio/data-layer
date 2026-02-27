@@ -4,7 +4,7 @@ import { use, useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, listKeys } from '@/lib/hooks/use-lists';
+import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useDeleteList, listKeys } from '@/lib/hooks/use-lists';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { useAppStore } from '@/lib/store';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
@@ -36,11 +36,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
-import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { ListMember, PipelineStage } from '@/lib/types';
+import type { ListMember, PipelineStage, CompanySignal, SignalStrengthTier } from '@/lib/types';
 
 // --- Helper components ---
 
@@ -69,6 +69,219 @@ function StageBadge({ stage }: { stage: PipelineStage | null | undefined }) {
     <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${config.color}`}>
       {config.label}
     </span>
+  );
+}
+
+// --- Signal tier helpers ---
+
+function getSignalTier(signalCount: number): SignalStrengthTier {
+  if (signalCount >= 3) return 'strong';
+  if (signalCount >= 2) return 'medium';
+  return 'weak';
+}
+
+const TIER_CONFIG: Record<SignalStrengthTier, { label: string; className: string }> = {
+  weak: { label: 'Weak', className: 'bg-amber-50 text-amber-700 border-amber-200' },
+  medium: { label: 'Medium', className: 'bg-blue-50 text-blue-700 border-blue-200' },
+  strong: { label: 'Strong', className: 'bg-green-50 text-green-700 border-green-200' },
+};
+
+const PESTLE_COLORS: Record<string, string> = {
+  Political: 'bg-red-50 text-red-700',
+  Economic: 'bg-blue-50 text-blue-700',
+  Social: 'bg-purple-50 text-purple-700',
+  Technological: 'bg-cyan-50 text-cyan-700',
+  Legal: 'bg-orange-50 text-orange-700',
+  Environmental: 'bg-green-50 text-green-700',
+};
+
+function SignalTierBadge({ count }: { count: number }) {
+  if (count === 0) return <span className="text-muted-foreground text-xs">-</span>;
+  const tier = getSignalTier(count);
+  const config = TIER_CONFIG[tier];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${config.className}`}>
+      {config.label}
+      <span className="text-[10px] opacity-70">({count})</span>
+    </span>
+  );
+}
+
+const SIGNAL_TYPE_LABELS: Record<string, { label: string; className: string }> = {
+  market_signal: { label: 'Market Signal', className: 'bg-indigo-50 text-indigo-700' },
+  expansion: { label: 'Expansion', className: 'bg-emerald-50 text-emerald-700' },
+  pain_point_detected: { label: 'Pain Point', className: 'bg-red-50 text-red-700' },
+  competitive_displacement: { label: 'Competitive', className: 'bg-orange-50 text-orange-700' },
+  new_product_launch: { label: 'New Product', className: 'bg-cyan-50 text-cyan-700' },
+  growth_momentum: { label: 'Growth', className: 'bg-green-50 text-green-700' },
+  recent_funding: { label: 'Funding', className: 'bg-yellow-50 text-yellow-700' },
+  tech_adoption: { label: 'Tech Adoption', className: 'bg-blue-50 text-blue-700' },
+  hiring_surge: { label: 'Hiring', className: 'bg-purple-50 text-purple-700' },
+};
+
+const SOURCE_TYPE_LABELS: Record<string, string> = {
+  rule_based: 'Rule-based',
+  llm_analysis: 'AI Analysis',
+  'enrichment provider': 'Enrichment Data',
+  'funding data': 'Funding Data',
+  'company website': 'Company Website',
+};
+
+function SignalDetailPanel({ signals, websiteProfile, companyDomain }: { signals: CompanySignal[]; websiteProfile?: string | null; companyDomain?: string | null }) {
+  const [showProfile, setShowProfile] = useState(false);
+
+  if (signals.length === 0 && !websiteProfile) return (
+    <div className="px-6 py-4 text-sm text-muted-foreground">No signals applied to this company.</div>
+  );
+
+  const marketSignals = signals.filter(s => s.signalType === 'market_signal');
+  const companySignals = signals.filter(s => s.signalType !== 'market_signal');
+
+  return (
+    <div className="px-6 py-4 space-y-4">
+      {/* Market signals section */}
+      {marketSignals.length > 0 && (
+        <div className="space-y-3">
+          <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            Market Signals ({marketSignals.length})
+          </div>
+          {marketSignals.map((signal) => {
+            const details = signal.signalData?.details;
+            const ms = signal.marketSignal;
+            const dimension = details?.pestleDimension;
+            const confidence = details?.confidence;
+            const dimColor = dimension ? PESTLE_COLORS[dimension] ?? 'bg-gray-50 text-gray-700' : '';
+
+            return (
+              <div key={signal.id} className="rounded-lg border bg-background p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {ms?.sourceUrl ? (
+                        <a
+                          href={ms.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm font-medium text-primary hover:underline flex items-center gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {ms.headline || details?.signalHeadline || 'Market Signal'}
+                          <ExternalLink className="h-3 w-3 flex-shrink-0" />
+                        </a>
+                      ) : (
+                        <span className="text-sm font-medium">{ms?.headline || details?.signalHeadline || 'Market Signal'}</span>
+                      )}
+                    </div>
+                    {ms?.sourceName && (
+                      <span className="text-xs text-muted-foreground">
+                        via {ms.sourceName.replace('exa_news_search', 'Exa News').replace('tavily_news_search', 'Tavily News')}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {dimension && (
+                      <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${dimColor}`}>
+                        {dimension}
+                      </span>
+                    )}
+                    {confidence != null && (
+                      <span className="text-xs text-muted-foreground">
+                        {(confidence * 100).toFixed(0)}% confidence
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {signal.signalData?.evidence && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {signal.signalData.evidence}
+                  </p>
+                )}
+                {ms?.signalCategory && (
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600">
+                      {ms.signalCategory}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      Strength: {(parseFloat(signal.signalStrength) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Company signals section */}
+      {companySignals.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Company Signals ({companySignals.length})
+            </div>
+            {companyDomain && (
+              <a
+                href={`https://${companyDomain}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-[10px] text-blue-600 hover:underline flex items-center gap-1"
+              >
+                Verify on {companyDomain} <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            )}
+          </div>
+          {companySignals.map((signal) => {
+            const typeConfig = SIGNAL_TYPE_LABELS[signal.signalType] ?? { label: signal.signalType, className: 'bg-gray-50 text-gray-700' };
+            const sourceLabel = SOURCE_TYPE_LABELS[signal.source] ?? signal.source;
+            const strength = parseFloat(signal.signalStrength);
+
+            return (
+              <div key={signal.id} className="rounded-lg border bg-background p-3 space-y-2">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${typeConfig.className}`}>
+                      {typeConfig.label}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      via {sourceLabel}
+                    </span>
+                  </div>
+                  <span className="text-xs text-muted-foreground flex-shrink-0">
+                    Strength: {(strength * 100).toFixed(0)}%
+                  </span>
+                </div>
+                {signal.signalData?.evidence && (
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {signal.signalData.evidence}
+                  </p>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Source data: PESTLE profile */}
+      {websiteProfile && (
+        <div className="space-y-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowProfile(!showProfile); }}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
+          >
+            <ChevronDown className={`h-3 w-3 transition-transform ${showProfile ? '' : '-rotate-90'}`} />
+            AI-Generated Profile (background context)
+          </button>
+          {showProfile && (
+            <div className="rounded-lg border bg-muted/20 p-4">
+              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans leading-relaxed">
+                {websiteProfile}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -131,31 +344,49 @@ const stageColumn: ColumnDef<ListMember> = {
   cell: ({ row }) => <StageBadge stage={row.original.pipelineStage} />,
 };
 
-const signalColumns: ColumnDef<ListMember>[] = [
-  {
-    id: 'signalScore',
-    header: 'Signals',
-    accessorFn: (row) => parseFloat(row.signalScore ?? '0'),
-    cell: ({ row }) => <ScoreBadge value={row.original.signalScore} />,
-  },
-  {
-    id: 'intelligenceScore',
-    header: () => (
-      <TooltipProvider>
-        <Tooltip>
-          <TooltipTrigger className="flex items-center gap-1 underline decoration-dotted decoration-muted-foreground underline-offset-4">
-            Score
-          </TooltipTrigger>
-          <TooltipContent className="max-w-xs">
-            <p>Composite score: ICP Fit (35%) + Signals (30%) + Originality (20%) + Cost Efficiency (15%). Populated after signal detection runs.</p>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    ),
-    accessorFn: (row) => parseFloat(row.intelligenceScore ?? '0'),
-    cell: ({ row }) => <ScoreBadge value={row.original.intelligenceScore} />,
-  },
-];
+function getSignalColumns(signalsByCompany?: Map<string, CompanySignal[]>): ColumnDef<ListMember>[] {
+  return [
+    {
+      id: 'signalScore',
+      header: 'Signals',
+      accessorFn: (row) => {
+        if (signalsByCompany) {
+          return signalsByCompany.get(row.companyId ?? '')?.length ?? 0;
+        }
+        return parseFloat(row.signalScore ?? '0');
+      },
+      cell: ({ row }) => {
+        if (signalsByCompany) {
+          const count = signalsByCompany.get(row.original.companyId ?? '')?.length ?? 0;
+          return (
+            <div className="flex items-center gap-1">
+              <SignalTierBadge count={count} />
+              {count > 0 && <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+            </div>
+          );
+        }
+        return <ScoreBadge value={row.original.signalScore} />;
+      },
+    },
+    {
+      id: 'intelligenceScore',
+      header: () => (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger className="flex items-center gap-1 underline decoration-dotted decoration-muted-foreground underline-offset-4">
+              Score
+            </TooltipTrigger>
+            <TooltipContent className="max-w-xs">
+              <p>Composite score: ICP Fit (35%) + Signals (30%) + Originality (20%) + Cost Efficiency (15%). Populated after signal detection runs.</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ),
+      accessorFn: (row) => parseFloat(row.intelligenceScore ?? '0'),
+      cell: ({ row }) => <ScoreBadge value={row.original.intelligenceScore} />,
+    },
+  ];
+}
 
 const reasonColumn: ColumnDef<ListMember> = {
   id: 'reason',
@@ -176,19 +407,20 @@ const addedColumn: ColumnDef<ListMember> = {
   cell: ({ row }) => formatRelativeTime(row.original.addedAt),
 };
 
-function getColumnsForStage(stage: PipelineStage | 'all'): ColumnDef<ListMember>[] {
+function getColumnsForStage(stage: PipelineStage | 'all', signalsByCompany?: Map<string, CompanySignal[]>): ColumnDef<ListMember>[] {
+  const signalCols = getSignalColumns(signalsByCompany);
   switch (stage) {
     case 'all':
-      return [...companyBaseColumns, icpColumn, stageColumn, ...signalColumns, reasonColumn, addedColumn];
+      return [...companyBaseColumns, icpColumn, stageColumn, ...signalCols, reasonColumn, addedColumn];
     case 'tam':
       return [...companyBaseColumns, icpColumn, reasonColumn, addedColumn];
     case 'active_segment':
-      return [...companyBaseColumns, icpColumn, ...signalColumns, reasonColumn, addedColumn];
+      return [...companyBaseColumns, icpColumn, ...signalCols, reasonColumn, addedColumn];
     case 'qualified':
     case 'ready_to_approach':
     case 'in_sequence':
     case 'converted':
-      return [...companyBaseColumns, icpColumn, ...signalColumns, reasonColumn, addedColumn];
+      return [...companyBaseColumns, icpColumn, ...signalCols, reasonColumn, addedColumn];
     default:
       return [...companyBaseColumns, icpColumn, stageColumn, addedColumn];
   }
@@ -317,13 +549,27 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const buildContacts = useBuildContacts();
   const runPersonaSignals = useRunPersonaSignals();
   const applyMarketSignals = useApplyMarketSignals();
+  const { data: memberSignals } = useMemberSignals(id, selectedClientId);
+  const deleteList = useDeleteList();
 
   const isContactList = list?.type === 'contact';
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   // Personas for "Find Buying Committee" dialog
   const { data: personas } = usePersonasV2(selectedClientId);
 
+  // Default to the furthest stage that has companies, so the user sees where the funnel is at
   const [selectedStage, setSelectedStage] = useState<PipelineStage | 'all'>('all');
+  const [stageInitialised, setStageInitialised] = useState(false);
+  useEffect(() => {
+    if (!funnel || stageInitialised) return;
+    const stageOrder: PipelineStage[] = ['ready_to_approach', 'qualified', 'active_segment', 'tam'];
+    const furthest = stageOrder.find(s => (funnel.stages[s] ?? 0) > 0);
+    if (furthest) {
+      setSelectedStage(furthest);
+    }
+    setStageInitialised(true);
+  }, [funnel, stageInitialised]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [refreshEnabled, setRefreshEnabled] = useState(false);
   const [refreshCron, setRefreshCron] = useState('');
@@ -336,27 +582,39 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [contactListName, setContactListName] = useState('');
   const [applyingSignals, setApplyingSignals] = useState(false);
 
-  // Poll build status and show toast on completion
+  // Poll build/job status and show toast on completion
   useEffect(() => {
     if (!buildingJobId || !buildJob) return;
     if (buildJob.status === 'completed') {
-      const output = buildJob.output as { companiesAdded?: number; contactsAdded?: number; companiesDiscovered?: number; warnings?: string[] };
-      if (output.warnings?.length) {
-        for (const warning of output.warnings) {
-          toast.warning(warning, { duration: 10000 });
+      const output = buildJob.output as Record<string, unknown>;
+
+      // Company signals job
+      if ('qualified' in output) {
+        const { processed, qualified: q, signalsDetected } = output as { processed: number; qualified: number; signalsDetected: number };
+        toast.success(`Signal detection complete: ${processed} evaluated, ${q} qualified, ${signalsDetected} signals detected`);
+        setStageInitialised(false); // re-auto-select furthest stage
+      }
+      // Build job
+      else {
+        const { companiesAdded, companiesDiscovered, warnings } = output as { companiesAdded?: number; companiesDiscovered?: number; warnings?: string[] };
+        if ((warnings as string[])?.length) {
+          for (const warning of warnings!) {
+            toast.warning(warning, { duration: 10000 });
+          }
+        }
+        if ((companiesAdded ?? 0) === 0 && (companiesDiscovered ?? 0) === 0) {
+          toast.error('Build completed but found 0 companies. Check your credit balance and ICP filters.');
+        } else {
+          toast.success(`Build complete: ${companiesDiscovered ?? 0} discovered, ${companiesAdded ?? 0} added to list`);
         }
       }
-      if ((output.companiesAdded ?? 0) === 0 && (output.companiesDiscovered ?? 0) === 0) {
-        toast.error('Build completed but found 0 companies. Check your credit balance and ICP filters.');
-      } else {
-        toast.success(`Build complete: ${output.companiesDiscovered ?? 0} discovered, ${output.companiesAdded ?? 0} added to list`);
-      }
+
       setBuildingJobId(null);
       qc.invalidateQueries({ queryKey: listKeys.detail(id) });
       qc.invalidateQueries({ queryKey: listKeys.members(id) });
       qc.invalidateQueries({ queryKey: listKeys.funnel(id) });
     } else if (buildJob.status === 'failed') {
-      toast.error('Build failed. Check job logs for details.');
+      toast.error('Job failed. Check job logs for details.');
       setBuildingJobId(null);
     }
   }, [buildJob?.status, buildingJobId, id, qc]);
@@ -368,10 +626,31 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   }), [selectedStage, isContactList]);
   const { data: members } = useListMembers(id, memberParams);
 
+  // Group company signals by companyId for the tier badge and sub-row
+  const signalsByCompany = useMemo(() => {
+    if (!memberSignals?.length) return undefined;
+    const map = new Map<string, CompanySignal[]>();
+    for (const signal of memberSignals) {
+      const existing = map.get(signal.companyId) ?? [];
+      existing.push(signal);
+      map.set(signal.companyId, existing);
+    }
+    return map;
+  }, [memberSignals]);
+
   const columns = useMemo(
-    () => isContactList ? getContactColumns() : getColumnsForStage(selectedStage),
-    [selectedStage, isContactList],
+    () => isContactList ? getContactColumns() : getColumnsForStage(selectedStage, signalsByCompany),
+    [selectedStage, isContactList, signalsByCompany],
   );
+
+  const renderSignalSubRow = useMemo(() => {
+    if (!signalsByCompany) return undefined;
+    return (row: ListMember) => {
+      const signals = signalsByCompany.get(row.companyId ?? '') ?? [];
+      const domain = row.company?.domain ?? row.companyDomain ?? null;
+      return <SignalDetailPanel signals={signals} websiteProfile={row.companyWebsiteProfile} companyDomain={domain} />;
+    };
+  }, [signalsByCompany]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
@@ -418,10 +697,24 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
+  const handleDelete = async () => {
+    try {
+      await deleteList.mutateAsync(id);
+      toast.success(`"${list.name}" deleted`);
+      router.push('/lists');
+    } catch {
+      toast.error('Failed to delete list');
+    }
+  };
+
   const handleRunCompanySignals = async () => {
     try {
-      await runCompanySignals.mutateAsync(id);
-      toast.success('Company signal detection started');
+      const result = await runCompanySignals.mutateAsync(id);
+      toast.success('Company signal detection started — this may take a minute...');
+      if (result?.jobId) {
+        setBuildingJobId(result.jobId);
+        setSelectedStage('all');
+      }
     } catch {
       toast.error('Failed to start signal detection');
     }
@@ -539,6 +832,10 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 Export
               </Button>
             )}
+            <Button variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </Button>
           </div>
         </div>
 
@@ -655,6 +952,10 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
               </Button>
             </>
           )}
+          <Button variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </Button>
         </div>
       </div>
 
@@ -767,6 +1068,15 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             )}
             {selectedStage === 'qualified' && qualifiedCount > 0 && (
               <>
+                <Button
+                  variant="outline"
+                  onClick={handleRunCompanySignals}
+                  disabled={runCompanySignals.isPending}
+                  size="sm"
+                >
+                  <Zap className="mr-2 h-4 w-4" />
+                  {runCompanySignals.isPending ? 'Re-evaluating...' : 'Re-run Signals'}
+                </Button>
                 <Button onClick={openBuyingCommitteeDialog} size="sm">
                   <Users className="mr-2 h-4 w-4" />
                   Find Buying Committee
@@ -779,7 +1089,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             )}
           </div>
         </div>
-        <DataTable columns={columns} data={members ?? []} />
+        <DataTable
+          columns={columns}
+          data={members ?? []}
+          renderSubRow={renderSignalSubRow}
+          getRowId={(row) => row.companyId ?? row.id}
+        />
       </div>}
 
       {/* Find Buying Committee Dialog */}
@@ -831,6 +1146,26 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 {buildContacts.isPending ? 'Building...' : 'Build Contact List'}
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete list</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <span className="font-medium text-foreground">{list.name}</span>?
+              {list.type === 'company' && ' Any child contact lists will also be removed.'}
+              {' '}This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setDeleteOpen(false)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteList.isPending}>
+              {deleteList.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

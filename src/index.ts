@@ -113,6 +113,7 @@ async function main() {
   discoveryService.setPromptConfig(promptConfigService);
   const listBuilder = new ListBuilder();
   listBuilder.setDiscoveryService(discoveryService);
+  listBuilder.setEnrichmentPipeline(enrichmentPipeline);
   // Signal services wired below after construction (see intelligence layer section)
   const exportEngine = new ExportEngine();
   const icpParser = new IcpParser(config.anthropicApiKey);

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '@/lib/store';
-import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus } from '@/lib/hooks/use-lists';
+import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus, useDeleteList } from '@/lib/hooks/use-lists';
 import { useIcps } from '@/lib/hooks/use-icps';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
 import { DataTable } from '@/components/shared/data-table';
@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatDate, formatRelativeTime, formatNumber } from '@/lib/utils';
-import { Plus, List, MoreHorizontal, Play, RefreshCw, Download, Loader2 } from 'lucide-react';
+import { Plus, List, MoreHorizontal, Play, RefreshCw, Download, Loader2, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -48,8 +48,10 @@ export default function ListsPage() {
   const buildList = useBuildList();
   const refreshList = useRefreshList();
   const triggerExport = useTriggerExport();
+  const deleteList = useDeleteList();
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [newName, setNewName] = useState('');
   const [newIcpId, setNewIcpId] = useState('');
   const [buildingListId, setBuildingListId] = useState<string | null>(null);
@@ -122,6 +124,17 @@ export default function ListsPage() {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      await deleteList.mutateAsync(deleteTarget.id);
+      toast.success(`"${deleteTarget.name}" deleted`);
+      setDeleteTarget(null);
+    } catch {
+      toast.error('Failed to delete list');
+    }
+  };
+
   const columns: ColumnDef<ListType>[] = [
     { accessorKey: 'name', header: 'Name', cell: ({ row }) => (
       <Link href={`/lists/${row.original.id}`} className="font-medium text-primary hover:underline">
@@ -179,6 +192,13 @@ export default function ListsPage() {
               <Download className="mr-2 h-4 w-4" />
               Export CSV
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => setDeleteTarget({ id: row.original.id, name: row.original.name })}
+              className="text-destructive focus:text-destructive"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       ),
@@ -227,6 +247,23 @@ export default function ListsPage() {
       ) : (
         <DataTable columns={columns} data={lists} />
       )}
+
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete list</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete <span className="font-medium text-foreground">{deleteTarget?.name}</span>? Any child contact lists will also be removed.
+          </p>
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={() => setDeleteTarget(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete} disabled={deleteList.isPending}>
+              {deleteList.isPending ? 'Deleting...' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="sm:max-w-md">

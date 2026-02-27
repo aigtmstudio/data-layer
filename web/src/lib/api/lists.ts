@@ -1,5 +1,5 @@
 import { apiClient } from '../api-client';
-import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage } from '../types';
+import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage, CompanySignal } from '../types';
 
 export async function getLists(clientId?: string): Promise<List[]> {
   const query = clientId ? `?clientId=${clientId}` : '';
@@ -61,6 +61,7 @@ interface RawListMember {
   companyDomain: string | null;
   companyIndustry: string | null;
   companySource: string | null;
+  companyWebsiteProfile: string | null;
   pipelineStage: PipelineStage | null;
   contactName: string | null;
   contactTitle: string | null;
@@ -95,6 +96,7 @@ export async function getListMembers(
     companyDomain: row.companyDomain,
     companyIndustry: row.companyIndustry,
     companySource: row.companySource,
+    companyWebsiteProfile: row.companyWebsiteProfile,
     pipelineStage: row.pipelineStage,
     company: row.companyId
       ? { name: row.companyName ?? '', domain: row.companyDomain } as ListMember['company']
@@ -144,4 +146,13 @@ export async function deepEnrich(id: string): Promise<{ jobId: string }> {
 export async function applyMarketSignals(id: string): Promise<{ jobId: string }> {
   const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/apply-market-signals`);
   return res.data;
+}
+
+export async function getMemberSignals(id: string, clientId: string): Promise<CompanySignal[]> {
+  const res = await apiClient.get<ApiResponse<CompanySignal[]>>(`/api/lists/${id}/member-signals?clientId=${clientId}`);
+  return res.data;
+}
+
+export async function deleteList(id: string): Promise<void> {
+  await apiClient.delete(`/api/lists/${id}`);
 }

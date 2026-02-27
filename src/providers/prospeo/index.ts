@@ -11,12 +11,12 @@ import type {
   ProviderResponse,
   PaginatedResponse,
 } from '../types.js';
-import { mapProspeoPersonEnrich, mapProspeoSearchResult } from './mappers.js';
+import { mapProspeoPersonEnrich, mapProspeoSearchPersonResult } from './mappers.js';
 import type {
   ProspeoEmailFinderResponse,
   ProspeoEmailVerifierResponse,
   ProspeoPersonEnrichResponse,
-  ProspeoSearchResponse,
+  ProspeoSearchPersonResponse,
 } from './types.js';
 
 export class ProspeoProvider extends BaseProvider implements DataProvider {
@@ -37,7 +37,7 @@ export class ProspeoProvider extends BaseProvider implements DataProvider {
 
   protected getAuthHeaders(): Record<string, string> {
     return {
-      'Authorization': `Bearer ${this.apiKey}`,
+      'X-KEY': this.apiKey,
       'Content-Type': 'application/json',
     };
   }
@@ -154,44 +154,67 @@ export class ProspeoProvider extends BaseProvider implements DataProvider {
 
   async searchPeople(params: PeopleSearchParams): Promise<PaginatedResponse<UnifiedContact>> {
     try {
+      // Prospeo uses nested filter objects: company.websites, person.job_title, etc.
+      const filters: Record<string, unknown> = {};
+
+      if (params.companyDomains?.length) {
+        filters.company = { ...filters.company as object, websites: { include: params.companyDomains } };
+      }
+      if (params.titlePatterns?.length) {
+        filters.person = { ...filters.person as object, job_title: { include: params.titlePatterns } };
+      }
+      if (params.departments?.length) {
+        filters.person = { ...filters.person as object, departments: { include: params.departments } };
+      }
+      if (params.countries?.length) {
+        filters.person = { ...filters.person as object, location: { include: params.countries } };
+      }
+
       const body: Record<string, unknown> = {
-        limit: Math.min(params.limit ?? 25, 100),
-        page: params.offset ? Math.floor(params.offset / 100) + 1 : 1,
+        filters,
+        page: params.offset ? Math.floor(params.offset / 25) + 1 : 1,
       };
 
-      if (params.titlePatterns?.length) body.titles = params.titlePatterns;
-      if (params.companyDomains?.length) body.domains = params.companyDomains;
-      if (params.countries?.length) body.locations = params.countries;
-
-      const raw = await this.request<ProspeoSearchResponse>(
-        'post', '/people-search', { body },
+      const raw = await this.request<ProspeoSearchPersonResponse>(
+        'post', '/search-person', { body },
       );
 
       if (raw.error) {
         return {
           success: false, data: [], totalResults: 0, hasMore: false,
-          error: raw.message ?? 'Search failed',
+          error: 'Search returned error',
           creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
         };
       }
 
-      const contacts = raw.response.map(mapProspeoSearchResult);
-      const total = raw.pagination?.total ?? contacts.length;
+      const contacts = (raw.results ?? []).map(mapProspeoSearchPersonResult);
+      const total = raw.pagination?.total_count ?? contacts.length;
+      const currentPage = raw.pagination?.current_page ?? 1;
+      const totalPages = raw.pagination?.total_page ?? 1;
 
       return {
         success: true,
         data: contacts,
         totalResults: total,
-        hasMore: (raw.pagination?.page ?? 1) * (raw.pagination?.per_page ?? 25) < total,
+        hasMore: currentPage < totalPages,
         creditsConsumed: contacts.length * 0.1,
-        fieldsPopulated: ['name', 'title', 'email', 'company'],
+        fieldsPopulated: ['name', 'title', 'company', 'linkedin'],
         qualityScore: 0.7,
       };
     } catch (error) {
+      // Prospeo returns 400 with NO_RESULTS when a company has no people — not a real error
+      const errMsg = String(error);
+      if (errMsg.includes('400') || errMsg.includes('NO_RESULTS')) {
+        this.log.info({ domains: params.companyDomains }, 'No people found at domain');
+        return {
+          success: true, data: [], totalResults: 0, hasMore: false,
+          creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
+        };
+      }
       this.log.error({ error }, 'People search failed');
       return {
         success: false, data: [], totalResults: 0, hasMore: false,
-        error: String(error), creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
+        error: errMsg, creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
       };
     }
   }

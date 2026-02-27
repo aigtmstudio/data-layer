@@ -6,6 +6,7 @@ export const listKeys = {
   all: (clientId?: string) => clientId ? ['lists', clientId] as const : ['lists'] as const,
   detail: (id: string) => ['lists', 'detail', id] as const,
   members: (id: string) => ['lists', 'members', id] as const,
+  memberSignals: (id: string) => ['lists', 'member-signals', id] as const,
   funnel: (id: string) => ['lists', 'funnel', id] as const,
   buildStatus: (id: string) => ['lists', 'build-status', id] as const,
 };
@@ -140,6 +141,15 @@ export function useRunPersonaSignals() {
   });
 }
 
+export function useMemberSignals(listId: string | null, clientId: string | null) {
+  return useQuery({
+    queryKey: listKeys.memberSignals(listId!),
+    queryFn: () => listsApi.getMemberSignals(listId!, clientId!),
+    enabled: !!listId && !!clientId,
+    staleTime: 30 * 1000,
+  });
+}
+
 export function useApplyMarketSignals() {
   const qc = useQueryClient();
   return useMutation({
@@ -149,6 +159,7 @@ export function useApplyMarketSignals() {
       qc.invalidateQueries({ queryKey: ['jobs'] });
       qc.invalidateQueries({ queryKey: listKeys.funnel(listId) });
       qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+      qc.invalidateQueries({ queryKey: listKeys.memberSignals(listId) });
     },
   });
 }
@@ -161,6 +172,16 @@ export function useDeepEnrich() {
       qc.invalidateQueries({ queryKey: ['lists'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
       qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
+  });
+}
+
+export function useDeleteList() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: listsApi.deleteList,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
     },
   });
 }

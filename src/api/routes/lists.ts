@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, isNull, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, isNull, desc, sql, inArray, gte } from 'drizzle-orm';
 import type { ServiceContainer } from '../../index.js';
 import { logger } from '../../lib/logger.js';
 
@@ -164,7 +164,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           companyId: schema.listMembers.companyId,
           contactId: schema.listMembers.contactId,
           icpFitScore: schema.listMembers.icpFitScore,
-          signalScore: schema.listMembers.signalScore,
+          signalScore: schema.companies.signalScore,
           intelligenceScore: schema.listMembers.intelligenceScore,
           personaScore: schema.listMembers.personaScore,
           addedReason: schema.listMembers.addedReason,
@@ -173,6 +173,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           companyDomain: schema.companies.domain,
           companyIndustry: schema.companies.industry,
           companySource: schema.companies.primarySource,
+          companyWebsiteProfile: schema.companies.websiteProfile,
           pipelineStage: schema.companies.pipelineStage,
           contactName: schema.contacts.fullName,
           contactTitle: schema.contacts.title,
@@ -186,6 +187,88 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
         .offset(offset);
 
       return { data: members };
+    },
+  );
+
+  // GET /api/lists/:id/member-signals — company signals for all list members, with linked market signal data
+  app.get<{ Params: { id: string }; Querystring: { clientId: string } }>(
+    '/:id/member-signals',
+    async (request) => {
+      const db = getDb();
+      const now = new Date();
+
+      // Get all company IDs in this list
+      const memberRows = await db
+        .select({ companyId: schema.listMembers.companyId })
+        .from(schema.listMembers)
+        .where(and(
+          eq(schema.listMembers.listId, request.params.id),
+          isNull(schema.listMembers.removedAt),
+        ));
+
+      const companyIds = memberRows
+        .map(r => r.companyId)
+        .filter((id): id is string => id !== null);
+
+      if (companyIds.length === 0) return { data: [] };
+
+      // Get all active company signals for these companies
+      const signals = await db
+        .select()
+        .from(schema.companySignals)
+        .where(and(
+          inArray(schema.companySignals.companyId, companyIds),
+          eq(schema.companySignals.clientId, request.query.clientId),
+          gte(schema.companySignals.expiresAt, now),
+        ));
+
+      // For market_signal type signals, fetch the linked market signal records
+      const marketSignalIds = signals
+        .filter(s => s.signalType === 'market_signal')
+        .map(s => (s.signalData as { details?: { marketSignalId?: string } })?.details?.marketSignalId)
+        .filter((id): id is string => !!id);
+
+      const uniqueMarketSignalIds = [...new Set(marketSignalIds)];
+
+      let marketSignalMap: Record<string, { headline: string; sourceUrl: string | null; sourceName: string | null; signalCategory: string | null; summary: string | null }> = {};
+
+      if (uniqueMarketSignalIds.length > 0) {
+        const marketSignals = await db
+          .select({
+            id: schema.marketSignals.id,
+            headline: schema.marketSignals.headline,
+            sourceUrl: schema.marketSignals.sourceUrl,
+            sourceName: schema.marketSignals.sourceName,
+            signalCategory: schema.marketSignals.signalCategory,
+            summary: schema.marketSignals.summary,
+          })
+          .from(schema.marketSignals)
+          .where(inArray(schema.marketSignals.id, uniqueMarketSignalIds));
+
+        for (const ms of marketSignals) {
+          marketSignalMap[ms.id] = {
+            headline: ms.headline,
+            sourceUrl: ms.sourceUrl,
+            sourceName: ms.sourceName,
+            signalCategory: ms.signalCategory,
+            summary: ms.summary,
+          };
+        }
+      }
+
+      // Enrich signals with market signal data
+      const enriched = signals.map(s => {
+        const details = (s.signalData as { details?: { marketSignalId?: string } })?.details;
+        const msId = details?.marketSignalId;
+        const marketSignal = msId ? marketSignalMap[msId] : undefined;
+
+        return {
+          ...s,
+          marketSignal: marketSignal ?? null,
+        };
+      });
+
+      return { data: enriched };
     },
   );
 
@@ -557,5 +640,29 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       });
 
     return reply.status(202).send({ data: { jobId: job.id } });
+  });
+
+  // DELETE /api/lists/:id — soft-delete a list
+  app.delete<{ Params: { id: string } }>('/:id', async (request, reply) => {
+    const db = getDb();
+    const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
+    if (!list) {
+      return reply.status(404).send({ error: 'List not found' });
+    }
+
+    await db
+      .update(schema.lists)
+      .set({ isActive: false, updatedAt: new Date() })
+      .where(eq(schema.lists.id, request.params.id));
+
+    // Also soft-delete any child contact lists that were built from this company list
+    if (list.type === 'company') {
+      await db
+        .update(schema.lists)
+        .set({ isActive: false, updatedAt: new Date() })
+        .where(eq(schema.lists.sourceCompanyListId, list.id));
+    }
+
+    return { success: true };
   });
 };

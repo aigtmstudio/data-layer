@@ -1,5 +1,5 @@
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, or, inArray, ilike, isNull, sql } from 'drizzle-orm';
+import { eq, ne, and, or, inArray, ilike, isNull, sql } from 'drizzle-orm';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import type { IcpFilters } from '../../db/schema/icps.js';
 import type { SourceRecord } from '../../db/schema/companies.js';
@@ -10,6 +10,7 @@ import type { IntelligenceScorer } from '../intelligence/intelligence-scorer.js'
 import type { ClientProfileService } from '../intelligence/client-profile.js';
 import type { PersonaSignalDetector } from '../intelligence/persona-signal-detector.js';
 import type { EmploymentRecord } from '../../db/schema/contacts.js';
+import type { EnrichmentPipeline } from '../enrichment/index.js';
 import { NotFoundError } from '../../lib/errors.js';
 import { logger } from '../../lib/logger.js';
 import { isBlockedDomain, isBlockedCompanyName, isPlausibleCompanyName } from '../company-discovery/index.js';
@@ -20,6 +21,11 @@ export class ListBuilder {
   private intelligenceScorer?: IntelligenceScorer;
   private clientProfileService?: ClientProfileService;
   private personaSignalDetector?: PersonaSignalDetector;
+  private enrichmentPipeline?: EnrichmentPipeline;
+
+  setEnrichmentPipeline(pipeline: EnrichmentPipeline): void {
+    this.enrichmentPipeline = pipeline;
+  }
 
   setDiscoveryService(service: CompanyDiscoveryService): void {
     this.discoveryService = service;
@@ -486,6 +492,28 @@ export class ListBuilder {
     const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, listId));
     if (!list) throw new NotFoundError('List', listId);
 
+    // Reset previously-qualified companies back to active_segment for re-evaluation
+    const qualifiedToReset = await db
+      .select({ companyId: schema.listMembers.companyId })
+      .from(schema.listMembers)
+      .innerJoin(schema.companies, eq(schema.listMembers.companyId, schema.companies.id))
+      .where(and(
+        eq(schema.listMembers.listId, listId),
+        isNull(schema.listMembers.removedAt),
+        eq(schema.companies.pipelineStage, 'qualified'),
+      ));
+
+    if (qualifiedToReset.length > 0) {
+      const resetIds = qualifiedToReset.map(m => m.companyId).filter((id): id is string => id !== null);
+      if (resetIds.length > 0) {
+        await db
+          .update(schema.companies)
+          .set({ pipelineStage: 'active_segment', updatedAt: new Date() })
+          .where(inArray(schema.companies.id, resetIds));
+        logger.info({ listId, count: resetIds.length }, 'Reset qualified companies to active_segment for re-evaluation');
+      }
+    }
+
     // Load list members whose company is at active_segment
     const activeMembers = await db
       .select({
@@ -535,6 +563,19 @@ export class ListBuilder {
       }
     }
 
+    // Clear previous company-level signals (not market_signal) so re-runs are idempotent
+    const companyIdsInList = activeMembers.map(m => m.company.id);
+    if (companyIdsInList.length > 0) {
+      await db
+        .delete(schema.companySignals)
+        .where(and(
+          inArray(schema.companySignals.companyId, companyIdsInList),
+          eq(schema.companySignals.clientId, list.clientId),
+          ne(schema.companySignals.signalType, 'market_signal'),
+        ));
+      logger.info({ listId, companies: companyIdsInList.length }, 'Cleared previous company signals for re-detection');
+    }
+
     let qualified = 0;
     let totalSignals = 0;
     const companyIdsToQualify: string[] = [];
@@ -546,6 +587,7 @@ export class ListBuilder {
         domain: company.domain ?? undefined,
         industry: company.industry ?? undefined,
         description: company.description ?? undefined,
+        websiteProfile: company.websiteProfile ?? undefined,
         employeeCount: company.employeeCount ?? undefined,
         employeeRange: company.employeeRange ?? undefined,
         techStack: (company.techStack as string[]) ?? [],
@@ -582,8 +624,12 @@ export class ListBuilder {
         .where(eq(schema.listMembers.id, member.memberId));
 
       // Qualify companies with sufficient signals
-      const hasStrongSignal = signals.some(s => s.signalStrength >= 0.5);
-      if (hasStrongSignal || result.signalScore >= 0.3) {
+      // Require genuine evidence: a single very strong signal (>=0.8),
+      // multiple strong signals (2+ at >=0.7), or high composite score (>=0.6)
+      const strongSignals = signals.filter(s => s.signalStrength >= 0.7);
+      const hasVeryStrongSignal = signals.some(s => s.signalStrength >= 0.8);
+      const hasMultipleStrong = strongSignals.length >= 2;
+      if (hasVeryStrongSignal || hasMultipleStrong || result.signalScore >= 0.6) {
         companyIdsToQualify.push(company.id);
         qualified++;
       }
@@ -614,15 +660,15 @@ export class ListBuilder {
 
   /**
    * Build a contact list from qualified companies in a source company list.
-   * Searches for contacts matching the persona at each qualified company,
-   * then creates a new contact list with those contacts as members.
+   * First discovers contacts at each qualified company via enrichment providers,
+   * then matches them against the persona criteria and adds them to the contact list.
    */
   async buildContactList(params: {
     clientId: string;
     sourceListId: string;
     contactListId: string;
     personaId: string;
-  }): Promise<{ contactsAdded: number }> {
+  }): Promise<{ contactsAdded: number; companiesSearched: number; contactsDiscovered: number }> {
     const db = getDb();
     const log = logger.child({ sourceListId: params.sourceListId, contactListId: params.contactListId });
 
@@ -633,10 +679,12 @@ export class ListBuilder {
       .where(eq(schema.personas.id, params.personaId));
     if (!persona) throw new NotFoundError('Persona', params.personaId);
 
-    // Load qualified companies from source list
+    // Load qualified companies from source list (with domain for people search)
     const qualifiedMembers = await db
       .select({
         companyId: schema.listMembers.companyId,
+        domain: schema.companies.domain,
+        companyName: schema.companies.name,
         icpFitScore: schema.listMembers.icpFitScore,
         signalScore: schema.listMembers.signalScore,
         intelligenceScore: schema.listMembers.intelligenceScore,
@@ -651,27 +699,62 @@ export class ListBuilder {
 
     if (qualifiedMembers.length === 0) {
       log.info('No qualified companies to search for contacts');
-      return { contactsAdded: 0 };
+      return { contactsAdded: 0, companiesSearched: 0, contactsDiscovered: 0 };
     }
 
-    log.info({ qualifiedCompanies: qualifiedMembers.length }, 'Searching for contacts matching persona');
+    log.info({ qualifiedCompanies: qualifiedMembers.length }, 'Discovering contacts at qualified companies');
 
     const titlePatterns = persona.titlePatterns as string[];
     const seniorityLevels = persona.seniorityLevels as string[];
     const departments = persona.departments as string[];
 
+    // Step 1: Discover contacts via enrichment providers for companies that have domains
+    let contactsDiscovered = 0;
+    let companiesSearched = 0;
+
+    if (this.enrichmentPipeline) {
+      const companiesToSearch = qualifiedMembers
+        .filter(m => m.domain && m.companyId)
+        .map(m => ({ companyId: m.companyId!, domain: m.domain! }));
+
+      if (companiesToSearch.length > 0) {
+        log.info({ companies: companiesToSearch.length }, 'Discovering contacts via people search');
+
+        // Search broadly by domain — persona filtering happens in step 2
+        const discovery = await this.enrichmentPipeline.discoverContacts(
+          params.clientId,
+          companiesToSearch,
+          { findEmails: true },
+        );
+
+        companiesSearched = discovery.companiesSearched;
+        contactsDiscovered = discovery.contactsDiscovered;
+        log.info({ contactsDiscovered, companiesSearched }, 'Contact discovery complete');
+      }
+    } else {
+      log.warn('No enrichment pipeline available — can only match existing contacts');
+    }
+
+    // Step 2: Match discovered (and any pre-existing) contacts against persona
+    // Use OR logic: a contact matches if ANY persona criterion hits (title, seniority, or department).
+    // Seniority values are normalised in DB (e.g. "c_suite") so we normalise persona values too.
     let contactsAdded = 0;
+
+    const seniorityNormMap: Record<string, string> = {
+      'c-suite': 'c_suite', 'vp': 'vp', 'director': 'director',
+      'head of': 'director', 'manager': 'manager', 'senior': 'senior',
+    };
+    const normalisedSeniority = (seniorityLevels ?? [])
+      .map(s => seniorityNormMap[s.toLowerCase()] ?? s.toLowerCase());
 
     for (const member of qualifiedMembers) {
       if (!member.companyId) continue;
 
-      const contactConditions = [
-        eq(schema.contacts.clientId, params.clientId),
-        eq(schema.contacts.companyId, member.companyId),
-      ];
+      // Build persona-match conditions (OR'd together)
+      const personaFilters = [];
 
       if (titlePatterns?.length) {
-        contactConditions.push(
+        personaFilters.push(
           or(...titlePatterns.map(p => {
             const sqlPattern = p.replace(/\*/g, '%');
             return ilike(schema.contacts.title, `%${sqlPattern}%`);
@@ -679,20 +762,25 @@ export class ListBuilder {
         );
       }
 
-      if (seniorityLevels?.length) {
-        contactConditions.push(inArray(schema.contacts.seniority, seniorityLevels));
+      if (normalisedSeniority.length) {
+        personaFilters.push(inArray(schema.contacts.seniority, normalisedSeniority));
       }
 
       if (departments?.length) {
-        contactConditions.push(
+        personaFilters.push(
           or(...departments.map(d => ilike(schema.contacts.department, `%${d}%`)))!,
         );
       }
 
+      // Must belong to this client + company, and match at least one persona criterion
       const matchingContacts = await db
         .select()
         .from(schema.contacts)
-        .where(and(...contactConditions));
+        .where(and(
+          eq(schema.contacts.clientId, params.clientId),
+          eq(schema.contacts.companyId, member.companyId),
+          personaFilters.length > 0 ? or(...personaFilters)! : sql`true`,
+        ));
 
       for (const contact of matchingContacts) {
         await db
@@ -721,8 +809,8 @@ export class ListBuilder {
       })
       .where(eq(schema.lists.id, params.contactListId));
 
-    log.info({ contactsAdded }, 'Contact list built');
-    return { contactsAdded };
+    log.info({ contactsAdded, companiesSearched, contactsDiscovered }, 'Contact list built');
+    return { contactsAdded, companiesSearched, contactsDiscovered };
   }
 
   /**

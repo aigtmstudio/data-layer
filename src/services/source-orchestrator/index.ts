@@ -207,10 +207,18 @@ export class SourceOrchestrator {
     config?: { providerOverride?: string[] },
   ): Promise<WaterfallResult<UnifiedContact[]>> {
     const providers = this.getProvidersWithCapability('people_search', config?.providerOverride);
+    logger.info(
+      { capability: 'people_search', providers: providers.map(p => p.name), domains: params.companyDomains },
+      'Providers available for people search',
+    );
     for (const provider of providers) {
       if (!provider.searchPeople) continue;
 
       const response = await provider.searchPeople(params);
+      logger.info(
+        { provider: provider.name, success: response.success, resultsCount: response.data?.length ?? 0, error: response.error },
+        'People search provider response',
+      );
       if (response.success && response.data && response.data.length > 0) {
         if (response.creditsConsumed > 0) {
           await this.creditManager.charge(clientId, {
@@ -224,6 +232,7 @@ export class SourceOrchestrator {
       }
     }
 
+    logger.warn({ domains: params.companyDomains }, 'No people found across any provider');
     return { result: [], providersUsed: [], totalCost: 0 };
   }
 

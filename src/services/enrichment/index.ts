@@ -240,6 +240,61 @@ export class EnrichmentPipeline {
     return inserted;
   }
 
+  /**
+   * Discover contacts at specified company domains.
+   * Unlike enrichCompanies, this does NOT re-enrich the companies or manage job state.
+   * Searches broadly by domain (no persona filters at the API level) to maximise
+   * discovery, then the caller filters contacts by persona criteria locally.
+   */
+  async discoverContacts(
+    clientId: string,
+    companies: Array<{ companyId: string; domain: string }>,
+    options?: {
+      findEmails?: boolean;
+    },
+  ): Promise<{ contactsDiscovered: number; companiesSearched: number }> {
+    const opts = { findEmails: true, ...options };
+    let contactsDiscovered = 0;
+    let companiesSearched = 0;
+
+    for (const { companyId, domain } of companies) {
+      try {
+        // Search broadly by domain only — persona filtering is done locally by the caller
+        const { result: people, providersUsed } = await this.orchestrator.searchPeople(clientId, {
+          companyDomains: [domain],
+        });
+
+        logger.info(
+          { domain, companyId, peopleFound: people?.length ?? 0, providersUsed },
+          'People search result',
+        );
+
+        for (const person of people ?? []) {
+          if (opts.findEmails && person.firstName && person.lastName && !person.workEmail) {
+            const emailResult = await this.orchestrator.findEmail(clientId, {
+              firstName: person.firstName,
+              lastName: person.lastName,
+              companyDomain: domain,
+            });
+            if (emailResult.result) {
+              person.workEmail = emailResult.result.email;
+            }
+          }
+
+          await this.upsertContact(clientId, companyId, person, 'unverified');
+          contactsDiscovered++;
+        }
+
+        companiesSearched++;
+      } catch (error) {
+        logger.error({ error, domain, companyId }, 'Contact discovery failed for domain');
+      }
+    }
+
+    logger.info({ contactsDiscovered, companiesSearched }, 'Contact discovery complete');
+    return { contactsDiscovered, companiesSearched };
+  }
+
   private async getJobErrors(jobId: string) {
     const db = getDb();
     const [job] = await db

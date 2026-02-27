@@ -15,16 +15,37 @@ export interface DetectedSignal {
   details?: Record<string, unknown>;
 }
 
-export const LLM_SIGNAL_PROMPT = `Analyze this company data and detect buying signals that suggest the company may need or be ready to purchase B2B services.
+export const LLM_SIGNAL_PROMPT = `You are analyzing company data to detect buying signals. The data comes from multiple sources, each labelled with its provenance (e.g. [enrichment provider], [company website: domain.com]).
 
-For each signal detected, return JSON array:
+CRITICAL: You may ONLY cite facts that appear in a verifiable data source — labelled as [enrichment provider] or [company website: domain.com]. If the only source for a claim is [AI-generated analysis], you must NOT treat it as evidence. AI-generated analyses are background context only, not factual evidence.
+
+Signal types to detect:
+- "expansion": New locations, markets, venues, or revenue streams — must cite specific evidence (e.g. a new site mentioned on their website)
+- "pain_point_detected": Operational challenges or technology gaps visible from their actual tech stack or website content
+- "competitive_displacement": Outdated tech stack (verifiable from enrichment data) or website content indicating dissatisfaction
+- "new_product_launch": New products, services, or concepts mentioned on their website
+- "growth_momentum": Multiple verifiable indicators (hiring pages on website, multiple locations, awards mentioned on site)
+
+For each signal, return JSON array:
 [{
-  "signalType": "pain_point_detected" | "competitive_displacement" | "expansion" | "new_product_launch",
-  "signalStrength": 0.0-1.0 (how strong the signal is),
-  "evidence": "Brief explanation of why this is a signal"
+  "signalType": "expansion" | "pain_point_detected" | "competitive_displacement" | "new_product_launch" | "growth_momentum",
+  "signalStrength": 0.0-1.0,
+  "evidence": "1-2 sentences citing the SPECIFIC fact and its source tag",
+  "sourceTag": "enrichment provider" | "company website" | "funding data"
 }]
 
-Only include signals with signalStrength >= 0.5. Return empty array [] if no strong signals detected. Return ONLY valid JSON.`;
+Rules:
+- ONLY include signals backed by verifiable facts from tagged sources
+- NEVER restate claims from [AI-generated analysis] as if they were evidence
+- Every evidence statement MUST reference what was found and where (e.g. "Website lists 5 venue locations [company website]" or "Tech stack includes WordPress, Google Maps [enrichment provider]")
+- Generic industry observations are NOT signals — evidence must be specific to THIS company
+
+signalStrength guide:
+- 0.7-0.8: Clear specific evidence from a verifiable source
+- 0.9-1.0: Strong evidence from multiple verifiable sources
+- Below 0.7: Do not include — not strong enough
+
+Return empty array [] if no verifiable signals detected. Return ONLY valid JSON.`;
 
 registerPrompt({
   key: 'signal.company.detection.system',
@@ -64,8 +85,10 @@ export class SignalDetector {
     // Rule-based signals from structured data
     signals.push(...this.detectRuleBasedSignals(company, clientContext));
 
-    // LLM-based signals from descriptions and unstructured data
-    if (company.description && company.description.length > 50) {
+    // LLM-based signals from PESTLE profiles, descriptions, and unstructured data
+    const hasProfile = company.websiteProfile && company.websiteProfile.length > 100;
+    const hasDescription = company.description && company.description.length > 50;
+    if (hasProfile || hasDescription) {
       const llmSignals = await this.detectLlmSignals(company, clientContext);
       signals.push(...llmSignals);
     }
@@ -89,8 +112,8 @@ export class SignalDetector {
       signals.push({
         signalType: 'recent_funding',
         signalStrength: 0.7,
-        evidence: `Funding stage: ${company.latestFundingStage ?? 'Unknown'}, Total: $${company.totalFunding ?? 'Unknown'}`,
-        source: 'rule_based',
+        evidence: `Funding stage: ${company.latestFundingStage ?? 'Unknown'}, Total: $${company.totalFunding ?? 'Unknown'} [funding data]`,
+        source: 'funding data',
       });
     }
 
@@ -106,47 +129,52 @@ export class SignalDetector {
         signals.push({
           signalType: 'tech_adoption',
           signalStrength: Math.min(0.6 + relevantTech.length * 0.1, 1.0),
-          evidence: `Uses related tech: ${relevantTech.join(', ')}`,
-          source: 'rule_based',
+          evidence: `Uses related tech: ${relevantTech.join(', ')} [enrichment provider]`,
+          source: 'enrichment provider',
           details: { matchedTech: relevantTech },
         });
       }
     }
 
-    // Hiring surge — indicated by large employee count with recent enrichment
-    // In production, compare to previous employee count
+    // Hiring surge — indicated by large employee count with verifiable text indicators
     if (company.employeeCount && company.employeeCount > 50) {
-      const growthIndicators = [
-        company.employeeRange?.includes('+'),
-        company.description?.toLowerCase().includes('hiring'),
-        company.description?.toLowerCase().includes('growing'),
-        company.description?.toLowerCase().includes('expanding'),
-      ].filter(Boolean).length;
+      const textToSearch = (company.description ?? '').toLowerCase();
+      const matchedKeywords: string[] = [];
+      if (company.employeeRange?.includes('+')) matchedKeywords.push(`employee range "${company.employeeRange}"`);
+      for (const kw of ['hiring', 'growing', 'expanding']) {
+        if (textToSearch.includes(kw)) matchedKeywords.push(`mentions "${kw}"`);
+      }
 
-      if (growthIndicators >= 2) {
+      if (matchedKeywords.length >= 2) {
         signals.push({
           signalType: 'hiring_surge',
-          signalStrength: 0.6 + growthIndicators * 0.1,
-          evidence: `Employee count: ${company.employeeCount}, growth indicators detected`,
-          source: 'rule_based',
+          signalStrength: 0.6 + matchedKeywords.length * 0.1,
+          evidence: `Employee count: ${company.employeeCount} [enrichment provider]. Indicators: ${matchedKeywords.join(', ')}.`,
+          source: 'enrichment provider',
         });
       }
     }
 
-    // Expansion signals from multi-location data
-    if (company.address && company.country) {
-      const expansionKeywords = ['new office', 'expansion', 'new market', 'opened'];
-      const hasExpansion = expansionKeywords.some(kw =>
-        company.description?.toLowerCase().includes(kw),
-      );
-      if (hasExpansion) {
-        signals.push({
-          signalType: 'expansion',
-          signalStrength: 0.7,
-          evidence: `Expansion indicators in company description`,
-          source: 'rule_based',
-        });
-      }
+    // Expansion signals — only from verifiable description text (not AI-generated PESTLE)
+    const expansionText = company.description ?? '';
+    const expansionKeywords = ['new office', 'expansion plan', 'new market', 'new location', 'new venue', 'new site', 'recently opened', 'just opened', 'opening soon'];
+    const matchedExpansion = expansionKeywords.filter(kw => expansionText.toLowerCase().includes(kw));
+    if (matchedExpansion.length > 0) {
+      // Extract a context snippet around the first matched keyword
+      const firstMatch = matchedExpansion[0];
+      const idx = expansionText.toLowerCase().indexOf(firstMatch);
+      const snippetStart = Math.max(0, idx - 40);
+      const snippetEnd = Math.min(expansionText.length, idx + firstMatch.length + 60);
+      const snippet = (snippetStart > 0 ? '...' : '') +
+        expansionText.slice(snippetStart, snippetEnd).trim() +
+        (snippetEnd < expansionText.length ? '...' : '');
+
+      signals.push({
+        signalType: 'expansion',
+        signalStrength: 0.7,
+        evidence: `Keywords found in company description: ${matchedExpansion.map(k => `"${k}"`).join(', ')}. Context: "${snippet}" [enrichment provider]`,
+        source: 'rule_based',
+      });
     }
 
     return signals;
@@ -157,13 +185,30 @@ export class SignalDetector {
     clientContext?: { products?: string[]; industry?: string },
   ): Promise<DetectedSignal[]> {
     try {
+      const domainTag = company.domain ? `company website: ${company.domain}` : 'company website';
+
       const companyInfo = [
         `Company: ${company.name}`,
-        company.industry ? `Industry: ${company.industry}` : null,
-        company.description ? `Description: ${company.description.slice(0, 500)}` : null,
-        company.employeeCount ? `Employees: ${company.employeeCount}` : null,
-        company.techStack?.length ? `Tech stack: ${company.techStack.join(', ')}` : null,
-        company.latestFundingStage ? `Funding: ${company.latestFundingStage}` : null,
+        company.domain ? `Domain: ${company.domain}` : null,
+
+        // Verifiable data from enrichment providers
+        company.industry ? `Industry: ${company.industry} [enrichment provider]` : null,
+        company.employeeCount ? `Employees: ${company.employeeCount} [enrichment provider]` : null,
+        company.techStack?.length
+          ? `Tech stack [enrichment provider]: ${company.techStack.join(', ')}`
+          : null,
+        company.latestFundingStage ? `Funding stage: ${company.latestFundingStage} [funding data]` : null,
+        company.totalFunding ? `Total funding: $${company.totalFunding} [funding data]` : null,
+
+        // Verifiable data from company website
+        company.description ? `Company description [${domainTag}]: ${company.description.slice(0, 500)}` : null,
+
+        // AI-generated analysis (background context only — NOT a verifiable source)
+        company.websiteProfile
+          ? `\n[AI-generated analysis — DO NOT cite as evidence, use as background context only]:\n${company.websiteProfile.slice(0, 2000)}`
+          : null,
+
+        // Client context
         clientContext?.products?.length
           ? `\nClient sells: ${clientContext.products.join(', ')}`
           : null,
@@ -179,7 +224,7 @@ export class SignalDetector {
 
       const message = await this.anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
+        max_tokens: 1024,
         system: signalPrompt,
         messages: [{ role: 'user', content: companyInfo }],
       });
@@ -187,21 +232,29 @@ export class SignalDetector {
       const textBlock = message.content.find(b => b.type === 'text');
       if (!textBlock?.text) return [];
 
-      const parsed = JSON.parse(textBlock.text);
+      // Strip markdown code fences if present
+      let jsonText = textBlock.text.trim();
+      if (jsonText.startsWith('```')) {
+        jsonText = jsonText.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
+      }
+
+      const parsed = JSON.parse(jsonText);
       if (!Array.isArray(parsed)) return [];
 
       return parsed
         .filter((s: Record<string, unknown>) =>
-          s.signalType && typeof s.signalStrength === 'number' && s.signalStrength >= 0.5,
+          s.signalType && typeof s.signalStrength === 'number' && s.signalStrength >= 0.7,
         )
         .map((s: Record<string, unknown>) => ({
           signalType: s.signalType as string,
           signalStrength: s.signalStrength as number,
           evidence: (s.evidence as string) ?? 'Detected by AI analysis',
-          source: 'llm_analysis',
+          source: (s.sourceTag as string) ?? 'llm_analysis',
+          details: s.sourceTag ? { sourceTag: s.sourceTag as string } : undefined,
         }));
     } catch (error) {
-      logger.warn({ error, company: company.name }, 'LLM signal detection failed');
+      const errMsg = error instanceof Error ? error.message : String(error);
+      logger.warn({ err: errMsg, company: company.name }, 'LLM signal detection failed');
       return [];
     }
   }

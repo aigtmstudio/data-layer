@@ -17,6 +17,8 @@ import type {
   ApolloPeopleSearchResponse,
   ApolloCompanySearchResponse,
   ApolloPersonEnrichResponse,
+  ApolloApiSearchResponse,
+  ApolloBulkMatchResponse,
 } from './types.js';
 
 export class ApolloProvider extends BaseProvider implements DataProvider {
@@ -142,31 +144,52 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
 
   async searchPeople(params: PeopleSearchParams): Promise<PaginatedResponse<UnifiedContact>> {
     try {
-      const body: Record<string, unknown> = {
+      // Step 1: Search via api_search (returns obfuscated data + Apollo IDs)
+      const searchBody: Record<string, unknown> = {
         per_page: Math.min(params.limit ?? 25, 100),
         page: params.offset ? Math.floor(params.offset / 100) + 1 : 1,
       };
 
-      if (params.titlePatterns?.length) body.person_titles = params.titlePatterns;
-      if (params.seniorityLevels?.length) body.person_seniorities = params.seniorityLevels;
-      if (params.departments?.length) body.person_departments = params.departments;
-      if (params.companyDomains?.length) body.organization_domains = params.companyDomains;
-      if (params.countries?.length) body.person_locations = params.countries;
+      // api_search uses q_* prefixed parameters
+      if (params.companyDomains?.length) {
+        searchBody.q_organization_domains = params.companyDomains.join('\n');
+      }
+      if (params.titlePatterns?.length) searchBody.person_titles = params.titlePatterns;
+      if (params.seniorityLevels?.length) searchBody.person_seniorities = params.seniorityLevels;
+      if (params.departments?.length) searchBody.person_departments = params.departments;
+      if (params.countries?.length) searchBody.person_locations = params.countries;
 
-      const raw = await this.request<ApolloPeopleSearchResponse>(
-        'post', '/mixed_people/search', { body },
+      const searchResult = await this.request<ApolloApiSearchResponse>(
+        'post', '/mixed_people/api_search', { body: searchBody },
       );
 
-      const contacts = raw.people.map(mapApolloPerson);
+      if (!searchResult.people?.length) {
+        return {
+          success: true, data: [], totalResults: 0, hasMore: false,
+          creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
+        };
+      }
+
+      // Step 2: Enrich the found people via bulk_match to get full details
+      const personIds = searchResult.people.map(p => p.id);
+      const matchResult = await this.request<ApolloBulkMatchResponse>(
+        'post', '/people/bulk_match', {
+          body: { details: personIds.map(id => ({ id })) },
+        },
+      );
+
+      const contacts = (matchResult.matches ?? [])
+        .filter(m => m != null)
+        .map(mapApolloPerson);
+
       return {
         success: true,
         data: contacts,
-        totalResults: raw.pagination.total_entries,
-        hasMore: raw.pagination.page < raw.pagination.total_pages,
-        nextPageToken: raw.pagination.page + 1,
-        creditsConsumed: 0,
-        fieldsPopulated: ['name', 'title', 'company', 'linkedin'],
-        qualityScore: 0.6,
+        totalResults: searchResult.total_entries,
+        hasMore: contacts.length >= (params.limit ?? 25),
+        creditsConsumed: matchResult.credits_consumed ?? 0,
+        fieldsPopulated: ['name', 'title', 'company', 'linkedin', 'seniority'],
+        qualityScore: 0.7,
       };
     } catch (error) {
       if (this.isPlanRestriction(error)) {

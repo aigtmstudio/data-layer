@@ -94,12 +94,15 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
   // GET /api/lists/:id/build-status
   app.get<{ Params: { id: string } }>('/:id/build-status', async (request, reply) => {
     const db = getDb();
+    const listId = request.params.id;
+
+    // Look for any job associated with this list
     const [job] = await db
       .select()
       .from(schema.jobs)
       .where(and(
-        eq(schema.jobs.type, 'list_build'),
-        sql`${schema.jobs.input}->>'listId' = ${request.params.id}`,
+        inArray(schema.jobs.type, ['list_build', 'contact_list_build', 'persona_signal_detection', 'company_signals']),
+        sql`(${schema.jobs.input}->>'listId' = ${listId} OR ${schema.jobs.input}->>'contactListId' = ${listId})`,
       ))
       .orderBy(desc(schema.jobs.createdAt))
       .limit(1);
@@ -164,7 +167,8 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           companyId: schema.listMembers.companyId,
           contactId: schema.listMembers.contactId,
           icpFitScore: schema.listMembers.icpFitScore,
-          signalScore: schema.companies.signalScore,
+          companySignalScore: schema.companies.signalScore,
+          signalScore: schema.listMembers.signalScore,
           intelligenceScore: schema.listMembers.intelligenceScore,
           personaScore: schema.listMembers.personaScore,
           addedReason: schema.listMembers.addedReason,
@@ -267,6 +271,47 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           marketSignal: marketSignal ?? null,
         };
       });
+
+      return { data: enriched };
+    },
+  );
+
+  // GET /api/lists/:id/contact-signals — persona signals for all contacts in a contact list
+  app.get<{ Params: { id: string }; Querystring: { clientId: string } }>(
+    '/:id/contact-signals',
+    async (request) => {
+      const db = getDb();
+      const now = new Date();
+
+      // Get all contact IDs in this list
+      const memberRows = await db
+        .select({ contactId: schema.listMembers.contactId })
+        .from(schema.listMembers)
+        .where(and(
+          eq(schema.listMembers.listId, request.params.id),
+          isNull(schema.listMembers.removedAt),
+        ));
+
+      const contactIds = memberRows
+        .map(r => r.contactId)
+        .filter((id): id is string => id !== null);
+
+      if (contactIds.length === 0) return { data: [] };
+
+      const signals = await db
+        .select()
+        .from(schema.contactSignals)
+        .where(and(
+          inArray(schema.contactSignals.contactId, contactIds),
+          eq(schema.contactSignals.clientId, request.query.clientId),
+          gte(schema.contactSignals.expiresAt, now),
+        ));
+
+      const FIT_TYPES = new Set(['title_match', 'seniority_match']);
+      const enriched = signals.map(s => ({
+        ...s,
+        category: FIT_TYPES.has(s.signalType) ? 'fit' as const : 'signal' as const,
+      }));
 
       return { data: enriched };
     },

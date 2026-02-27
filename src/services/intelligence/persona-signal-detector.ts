@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import type { EmploymentRecord } from '../../db/schema/contacts.js';
 import type { SignalData } from '../../db/schema/intelligence.js';
 import { logger } from '../../lib/logger.js';
@@ -187,30 +187,31 @@ export class PersonaSignalDetector {
     contact: ContactData,
     persona: PersonaContext,
   ): Promise<PersonaSignalResult[]> {
+    const contactSummary = [
+      `Title: ${contact.title ?? 'Unknown'}`,
+      `Seniority: ${contact.seniority ?? 'Unknown'}`,
+      `Department: ${contact.department ?? 'Unknown'}`,
+      `Employment History:`,
+      ...contact.employmentHistory.map(e =>
+        `  - ${e.title} at ${e.company}${e.startDate ? ` (${e.startDate}${e.endDate ? ' - ' + e.endDate : ' - present'})` : ''}`,
+      ),
+    ].join('\n');
+
+    const personaSummary = [
+      `Target Persona: ${persona.name}`,
+      `Title Patterns: ${persona.titlePatterns.join(', ')}`,
+      `Seniority: ${persona.seniorityLevels.join(', ')}`,
+      `Departments: ${persona.departments.join(', ')}`,
+    ].join('\n');
+
+    let careerPrompt = CAREER_ANALYSIS_PROMPT;
+    if (this.promptConfig) {
+      try { careerPrompt = await this.promptConfig.getPrompt('signal.persona.career.system'); } catch { /* use default */ }
+    }
+
+    let message;
     try {
-      const contactSummary = [
-        `Title: ${contact.title ?? 'Unknown'}`,
-        `Seniority: ${contact.seniority ?? 'Unknown'}`,
-        `Department: ${contact.department ?? 'Unknown'}`,
-        `Employment History:`,
-        ...contact.employmentHistory.map(e =>
-          `  - ${e.title} at ${e.company}${e.startDate ? ` (${e.startDate}${e.endDate ? ' - ' + e.endDate : ' - present'})` : ''}`,
-        ),
-      ].join('\n');
-
-      const personaSummary = [
-        `Target Persona: ${persona.name}`,
-        `Title Patterns: ${persona.titlePatterns.join(', ')}`,
-        `Seniority: ${persona.seniorityLevels.join(', ')}`,
-        `Departments: ${persona.departments.join(', ')}`,
-      ].join('\n');
-
-      let careerPrompt = CAREER_ANALYSIS_PROMPT;
-      if (this.promptConfig) {
-        try { careerPrompt = await this.promptConfig.getPrompt('signal.persona.career.system'); } catch { /* use default */ }
-      }
-
-      const message = await this.anthropic.messages.create({
+      message = await this.anthropic.messages.create({
         model: 'claude-haiku-4-5-20251001',
         max_tokens: 1024,
         system: careerPrompt,
@@ -219,11 +220,20 @@ export class PersonaSignalDetector {
           content: `${personaSummary}\n\n## Contact\n${contactSummary}`,
         }],
       });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      logger.warn({ contactId: contact.id, err: error, errorMessage: msg }, 'Anthropic API call failed for persona signal detection');
+      return [];
+    }
 
-      const textBlock = message.content.find(b => b.type === 'text');
-      if (!textBlock?.text) return [];
+    const textBlock = message.content.find(b => b.type === 'text');
+    if (!textBlock?.text) return [];
 
-      const cleaned = textBlock.text.replace(/```json\n?|\n?```/g, '').trim();
+    try {
+      // Extract JSON from between code fences if present, otherwise use raw text.
+      // The LLM sometimes appends reasoning text after the closing fence.
+      const fenceMatch = textBlock.text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
+      const cleaned = (fenceMatch ? fenceMatch[1] : textBlock.text).trim();
       const parsed = JSON.parse(cleaned) as Array<{
         signalType: string;
         signalStrength: number;
@@ -240,7 +250,7 @@ export class PersonaSignalDetector {
           source: 'llm_analysis' as const,
         }));
     } catch (error) {
-      logger.warn({ error }, 'LLM persona signal detection failed, skipping');
+      logger.warn({ contactId: contact.id, err: error, rawText: textBlock.text.slice(0, 200) }, 'Failed to parse LLM persona signal response');
       return [];
     }
   }
@@ -255,6 +265,14 @@ export class PersonaSignalDetector {
     const db = getDb();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + 90 * 24 * 60 * 60 * 1000); // 90 days
+
+    // Clear previous signals for this contact to avoid duplicates on re-run
+    await db.delete(schema.contactSignals).where(
+      and(
+        eq(schema.contactSignals.contactId, contactId),
+        eq(schema.contactSignals.clientId, clientId),
+      ),
+    );
 
     await db.insert(schema.contactSignals).values(
       signals.map(s => ({
@@ -273,25 +291,50 @@ export class PersonaSignalDetector {
     );
   }
 
+  static readonly FIT_TYPES = new Set(['title_match', 'seniority_match']);
+
   /**
-   * Compute a composite persona score from all signals for a contact.
+   * Compute persona fit score from static attribute matches (title, seniority).
    * Returns 0.00-1.00.
    */
-  computePersonaScore(signals: PersonaSignalResult[]): number {
-    if (signals.length === 0) return 0;
+  computeFitScore(signals: PersonaSignalResult[]): number {
+    const fitSignals = signals.filter(s => PersonaSignalDetector.FIT_TYPES.has(s.signalType));
+    if (fitSignals.length === 0) return 0;
 
-    // Weight by signal type importance
     const weights: Record<string, number> = {
-      job_change: 0.35,
-      title_match: 0.30,
-      seniority_match: 0.20,
-      tenure_signal: 0.15,
+      title_match: 0.60,
+      seniority_match: 0.40,
     };
 
     let weightedSum = 0;
     let totalWeight = 0;
 
-    for (const signal of signals) {
+    for (const signal of fitSignals) {
+      const weight = weights[signal.signalType] ?? 0.1;
+      weightedSum += signal.signalStrength * weight;
+      totalWeight += weight;
+    }
+
+    return totalWeight > 0 ? Math.min(1, weightedSum / totalWeight) : 0;
+  }
+
+  /**
+   * Compute buying signal score from event-based signals (job change, promotion).
+   * Returns 0.00-1.00.
+   */
+  computeSignalScore(signals: PersonaSignalResult[]): number {
+    const eventSignals = signals.filter(s => !PersonaSignalDetector.FIT_TYPES.has(s.signalType));
+    if (eventSignals.length === 0) return 0;
+
+    const weights: Record<string, number> = {
+      job_change: 0.65,
+      tenure_signal: 0.35,
+    };
+
+    let weightedSum = 0;
+    let totalWeight = 0;
+
+    for (const signal of eventSignals) {
       const weight = weights[signal.signalType] ?? 0.1;
       weightedSum += signal.signalStrength * weight;
       totalWeight += weight;

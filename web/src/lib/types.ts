@@ -278,6 +278,7 @@ export interface ListMember {
   companyId: string | null;
   contactId: string | null;
   icpFitScore: string | null;
+  companySignalScore: string | null;
   signalScore: string | null;
   intelligenceScore: string | null;
   personaScore: string | null;
@@ -388,6 +389,7 @@ export interface ContactSignal {
   source: string;
   detectedAt: string;
   expiresAt: string;
+  category: 'fit' | 'signal';
 }
 
 export interface MarketSignal {

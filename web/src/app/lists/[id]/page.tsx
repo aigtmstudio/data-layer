@@ -4,7 +4,7 @@ import { use, useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useDeleteList, listKeys } from '@/lib/hooks/use-lists';
+import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useContactSignals, useDeleteList, listKeys } from '@/lib/hooks/use-lists';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { useAppStore } from '@/lib/store';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
@@ -36,11 +36,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
-import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { ListMember, PipelineStage, CompanySignal, SignalStrengthTier } from '@/lib/types';
+import type { ListMember, PipelineStage, CompanySignal, ContactSignal, SignalStrengthTier } from '@/lib/types';
 
 // --- Helper components ---
 
@@ -285,6 +285,74 @@ function SignalDetailPanel({ signals, websiteProfile, companyDomain }: { signals
   );
 }
 
+const PERSONA_SIGNAL_LABELS: Record<string, { label: string; className: string }> = {
+  title_match: { label: 'Title Match', className: 'bg-blue-50 text-blue-700' },
+  seniority_match: { label: 'Seniority Match', className: 'bg-purple-50 text-purple-700' },
+  job_change: { label: 'Job Change', className: 'bg-emerald-50 text-emerald-700' },
+  tenure_signal: { label: 'Recent Promotion', className: 'bg-orange-50 text-orange-700' },
+};
+
+function SignalCard({ signal }: { signal: ContactSignal }) {
+  const typeConfig = PERSONA_SIGNAL_LABELS[signal.signalType] ?? { label: signal.signalType, className: 'bg-gray-50 text-gray-700' };
+  const sourceLabel = SOURCE_TYPE_LABELS[signal.source] ?? signal.source;
+  const strength = parseFloat(signal.signalStrength);
+  const data = signal.signalData as { evidence?: string; details?: Record<string, unknown> };
+
+  return (
+    <div className="rounded-lg border bg-background p-3 space-y-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${typeConfig.className}`}>
+            {typeConfig.label}
+          </span>
+          <span className="text-[10px] text-muted-foreground">via {sourceLabel}</span>
+        </div>
+        <span className="text-xs text-muted-foreground flex-shrink-0">Strength: {(strength * 100).toFixed(0)}%</span>
+      </div>
+      {data.evidence && (
+        <p className="text-xs text-muted-foreground leading-relaxed">{data.evidence}</p>
+      )}
+    </div>
+  );
+}
+
+function PersonaSignalDetailPanel({ signals }: { signals: ContactSignal[] }) {
+  if (signals.length === 0) return (
+    <div className="px-6 py-4 text-sm text-muted-foreground">No persona signals detected for this contact.</div>
+  );
+
+  const fitSignals = signals.filter(s => s.category === 'fit');
+  const eventSignals = signals.filter(s => s.category === 'signal');
+
+  return (
+    <div className="px-6 py-4 space-y-4">
+      {/* Persona Fit section */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Persona Fit ({fitSignals.length})
+        </div>
+        {fitSignals.length > 0 ? (
+          fitSignals.map(s => <SignalCard key={s.id} signal={s} />)
+        ) : (
+          <p className="text-xs text-muted-foreground">No fit criteria matched.</p>
+        )}
+      </div>
+
+      {/* Buying Signals section */}
+      <div className="space-y-2">
+        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          Buying Signals ({eventSignals.length})
+        </div>
+        {eventSignals.length > 0 ? (
+          eventSignals.map(s => <SignalCard key={s.id} signal={s} />)
+        ) : (
+          <p className="text-xs text-muted-foreground">No buying signals detected.</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // --- Company list column definitions ---
 
 const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
@@ -353,7 +421,7 @@ function getSignalColumns(signalsByCompany?: Map<string, CompanySignal[]>): Colu
         if (signalsByCompany) {
           return signalsByCompany.get(row.companyId ?? '')?.length ?? 0;
         }
-        return parseFloat(row.signalScore ?? '0');
+        return parseFloat(row.companySignalScore ?? '0');
       },
       cell: ({ row }) => {
         if (signalsByCompany) {
@@ -365,7 +433,7 @@ function getSignalColumns(signalsByCompany?: Map<string, CompanySignal[]>): Colu
             </div>
           );
         }
-        return <ScoreBadge value={row.original.signalScore} />;
+        return <ScoreBadge value={row.original.companySignalScore} />;
       },
     },
     {
@@ -428,7 +496,7 @@ function getColumnsForStage(stage: PipelineStage | 'all', signalsByCompany?: Map
 
 // --- Contact list column definitions ---
 
-function getContactColumns(): ColumnDef<ListMember>[] {
+function getContactColumns(signalsByContact?: Map<string, ContactSignal[]>): ColumnDef<ListMember>[] {
   return [
     {
       id: 'contactName',
@@ -463,10 +531,26 @@ function getContactColumns(): ColumnDef<ListMember>[] {
       cell: ({ row }) => row.original.contact?.workEmail ?? row.original.contactEmail ?? '-',
     },
     {
-      id: 'personaScore',
-      header: 'Persona Score',
+      id: 'personaFit',
+      header: 'Persona Fit',
       accessorFn: (row) => parseFloat(row.personaScore ?? '0'),
       cell: ({ row }) => <ScoreBadge value={row.original.personaScore} thresholds={{ green: 0.6, amber: 0.3 }} />,
+    },
+    {
+      id: 'signals',
+      header: 'Signals',
+      accessorFn: (row) => parseFloat(row.signalScore ?? '0'),
+      cell: ({ row }) => {
+        const score = row.original.signalScore;
+        const eventSignals = signalsByContact?.get(row.original.contactId ?? '')?.filter(s => s.category === 'signal') ?? [];
+        if (!score && eventSignals.length === 0) return <span className="text-muted-foreground text-xs">-</span>;
+        return (
+          <div className="flex items-center gap-1">
+            <ScoreBadge value={score} thresholds={{ green: 0.6, amber: 0.3 }} />
+            {eventSignals.length > 0 && <ChevronDown className="h-3 w-3 text-muted-foreground" />}
+          </div>
+        );
+      },
     },
     reasonColumn,
     addedColumn,
@@ -550,6 +634,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const runPersonaSignals = useRunPersonaSignals();
   const applyMarketSignals = useApplyMarketSignals();
   const { data: memberSignals } = useMemberSignals(id, selectedClientId);
+  const { data: contactSignals } = useContactSignals(list?.type === 'contact' ? id : null, selectedClientId);
   const deleteList = useDeleteList();
 
   const isContactList = list?.type === 'contact';
@@ -576,20 +661,52 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [buildingJobId, setBuildingJobId] = useState<string | null>(null);
   const { data: buildJob } = useBuildStatus(buildingJobId ? id : null);
 
+  // Auto-poll build status for contact lists that have no members yet (build still running)
+  const [contactBuildDone, setContactBuildDone] = useState(false);
+  const shouldPollContactBuild = isContactList && list?.memberCount === 0 && !contactBuildDone;
+  const { data: contactBuildJob } = useBuildStatus(shouldPollContactBuild ? id : null);
+
+  useEffect(() => {
+    if (!shouldPollContactBuild || !contactBuildJob) return;
+    if (contactBuildJob.status === 'completed') {
+      const output = contactBuildJob.output as { contactsAdded?: number; contactsDiscovered?: number };
+      toast.success(`Contact build complete: ${output.contactsAdded ?? 0} contacts added`);
+      setContactBuildDone(true);
+      qc.invalidateQueries({ queryKey: listKeys.detail(id) });
+      qc.invalidateQueries({ queryKey: listKeys.members(id) });
+      qc.invalidateQueries({ queryKey: listKeys.funnel(id) });
+    } else if (contactBuildJob.status === 'failed') {
+      toast.error('Contact build failed. Check job logs for details.');
+      setContactBuildDone(true);
+    }
+  }, [contactBuildJob?.status, shouldPollContactBuild, id, qc]);
+
+  const isContactBuildRunning = shouldPollContactBuild &&
+    contactBuildJob?.status !== 'completed' && contactBuildJob?.status !== 'failed';
+
   // Find Buying Committee dialog state
   const [buyingCommitteeOpen, setBuyingCommitteeOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
   const [contactListName, setContactListName] = useState('');
   const [applyingSignals, setApplyingSignals] = useState(false);
+  const [personaSignalRunning, setPersonaSignalRunning] = useState(false);
 
   // Poll build/job status and show toast on completion
   useEffect(() => {
     if (!buildingJobId || !buildJob) return;
+    // Only react to the specific job we're tracking
+    if (buildJob.id !== buildingJobId) return;
     if (buildJob.status === 'completed') {
       const output = buildJob.output as Record<string, unknown>;
 
+      // Persona signals job
+      if ('signalsDetected' in output && 'processed' in output && !('qualified' in output)) {
+        const { processed, signalsDetected } = output as { processed: number; signalsDetected: number };
+        toast.success(`Persona signals complete: ${processed} contacts evaluated, ${signalsDetected} signals detected`);
+        setPersonaSignalRunning(false);
+      }
       // Company signals job
-      if ('qualified' in output) {
+      else if ('qualified' in output) {
         const { processed, qualified: q, signalsDetected } = output as { processed: number; qualified: number; signalsDetected: number };
         toast.success(`Signal detection complete: ${processed} evaluated, ${q} qualified, ${signalsDetected} signals detected`);
         setStageInitialised(false); // re-auto-select furthest stage
@@ -613,9 +730,11 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       qc.invalidateQueries({ queryKey: listKeys.detail(id) });
       qc.invalidateQueries({ queryKey: listKeys.members(id) });
       qc.invalidateQueries({ queryKey: listKeys.funnel(id) });
+      qc.invalidateQueries({ queryKey: listKeys.contactSignals(id) });
     } else if (buildJob.status === 'failed') {
       toast.error('Job failed. Check job logs for details.');
       setBuildingJobId(null);
+      setPersonaSignalRunning(false);
     }
   }, [buildJob?.status, buildingJobId, id, qc]);
 
@@ -638,9 +757,21 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     return map;
   }, [memberSignals]);
 
+  // Group contact signals by contactId for the sub-row
+  const signalsByContact = useMemo(() => {
+    if (!contactSignals?.length) return undefined;
+    const map = new Map<string, ContactSignal[]>();
+    for (const signal of contactSignals) {
+      const existing = map.get(signal.contactId) ?? [];
+      existing.push(signal);
+      map.set(signal.contactId, existing);
+    }
+    return map;
+  }, [contactSignals]);
+
   const columns = useMemo(
-    () => isContactList ? getContactColumns() : getColumnsForStage(selectedStage, signalsByCompany),
-    [selectedStage, isContactList, signalsByCompany],
+    () => isContactList ? getContactColumns(signalsByContact) : getColumnsForStage(selectedStage, signalsByCompany),
+    [selectedStage, isContactList, signalsByCompany, signalsByContact],
   );
 
   const renderSignalSubRow = useMemo(() => {
@@ -651,6 +782,13 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       return <SignalDetailPanel signals={signals} websiteProfile={row.companyWebsiteProfile} companyDomain={domain} />;
     };
   }, [signalsByCompany]);
+
+  const renderContactSubRow = useMemo(() => {
+    return (row: ListMember) => {
+      const signals = signalsByContact?.get(row.contactId ?? '') ?? [];
+      return <PersonaSignalDetailPanel signals={signals} />;
+    };
+  }, [signalsByContact]);
 
   if (isLoading) {
     return <div className="flex items-center justify-center py-12">Loading...</div>;
@@ -722,8 +860,14 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
   const handleRunPersonaSignals = async () => {
     try {
-      await runPersonaSignals.mutateAsync(id);
-      toast.success('Persona signal detection started');
+      const result = await runPersonaSignals.mutateAsync(id);
+      toast.success('Persona signal detection started — this may take a moment...');
+      setPersonaSignalRunning(true);
+      if (result?.jobId) {
+        // Clear stale build-status cache so polling fetches the new job
+        await qc.invalidateQueries({ queryKey: listKeys.buildStatus(id) });
+        setBuildingJobId(result.jobId);
+      }
     } catch {
       toast.error('Failed to start persona signal detection');
     }
@@ -821,10 +965,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
           <div className="flex gap-2">
             <Button
               onClick={handleRunPersonaSignals}
-              disabled={runPersonaSignals.isPending || !hasMembers}
+              disabled={runPersonaSignals.isPending || personaSignalRunning || !hasMembers}
             >
-              <Zap className="mr-2 h-4 w-4" />
-              {runPersonaSignals.isPending ? 'Running...' : 'Run Persona Signals'}
+              {personaSignalRunning
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Zap className="mr-2 h-4 w-4" />}
+              {personaSignalRunning ? 'Detecting signals...' : 'Run Persona Signals'}
             </Button>
             {hasMembers && (
               <Button variant="outline" onClick={handleExport}>
@@ -873,15 +1019,27 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
           </Card>
         </div>
 
-        {/* Empty state */}
+        {/* Empty state / building state */}
         {!hasMembers && (
           <Card className="border-dashed">
             <CardContent className="flex flex-col items-center justify-center py-12">
-              <Users className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No contacts yet</h3>
-              <p className="text-sm text-muted-foreground text-center max-w-md">
-                Contacts are being discovered from qualified companies. Check the Jobs page for progress.
-              </p>
+              {isContactBuildRunning ? (
+                <>
+                  <Loader2 className="h-12 w-12 text-primary mb-4 animate-spin" />
+                  <h3 className="text-lg font-semibold mb-2">Building contact list...</h3>
+                  <p className="text-sm text-muted-foreground text-center max-w-md">
+                    Discovering and matching contacts from qualified companies. This may take a minute.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Users className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No contacts yet</h3>
+                  <p className="text-sm text-muted-foreground text-center max-w-md">
+                    Contacts are being discovered from qualified companies. Check the Jobs page for progress.
+                  </p>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
@@ -892,7 +1050,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold">Contacts</h2>
             </div>
-            <DataTable columns={columns} data={members ?? []} />
+            <DataTable
+              columns={columns}
+              data={members ?? []}
+              renderSubRow={renderContactSubRow}
+              getRowId={(row) => row.contactId ?? row.id}
+            />
           </div>
         )}
       </div>
@@ -1092,8 +1255,8 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         <DataTable
           columns={columns}
           data={members ?? []}
-          renderSubRow={renderSignalSubRow}
-          getRowId={(row) => row.companyId ?? row.id}
+          renderSubRow={isContactList ? renderContactSubRow : renderSignalSubRow}
+          getRowId={(row) => isContactList ? (row.contactId ?? row.id) : (row.companyId ?? row.id)}
         />
       </div>}
 

@@ -890,12 +890,14 @@ export class ListBuilder {
 
       totalSignals += signals.length;
 
-      // Compute persona score and update list member
-      const personaScore = this.personaSignalDetector.computePersonaScore(signals);
+      // Compute separate fit score (static attributes) and signal score (events)
+      const fitScore = this.personaSignalDetector.computeFitScore(signals);
+      const signalScore = this.personaSignalDetector.computeSignalScore(signals);
       await db
         .update(schema.listMembers)
         .set({
-          personaScore: String(personaScore.toFixed(2)),
+          personaScore: String(fitScore.toFixed(2)),
+          signalScore: String(signalScore.toFixed(2)),
         })
         .where(eq(schema.listMembers.id, member.memberId));
     }

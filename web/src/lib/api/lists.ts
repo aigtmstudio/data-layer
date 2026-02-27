@@ -1,5 +1,5 @@
 import { apiClient } from '../api-client';
-import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage, CompanySignal } from '../types';
+import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage, CompanySignal, ContactSignal } from '../types';
 
 export async function getLists(clientId?: string): Promise<List[]> {
   const query = clientId ? `?clientId=${clientId}` : '';
@@ -52,6 +52,7 @@ interface RawListMember {
   companyId: string | null;
   contactId: string | null;
   icpFitScore: string | null;
+  companySignalScore: string | null;
   signalScore: string | null;
   intelligenceScore: string | null;
   personaScore: string | null;
@@ -86,6 +87,7 @@ export async function getListMembers(
     companyId: row.companyId,
     contactId: row.contactId,
     icpFitScore: row.icpFitScore,
+    companySignalScore: row.companySignalScore,
     signalScore: row.signalScore,
     intelligenceScore: row.intelligenceScore,
     personaScore: row.personaScore,
@@ -150,6 +152,11 @@ export async function applyMarketSignals(id: string): Promise<{ jobId: string }>
 
 export async function getMemberSignals(id: string, clientId: string): Promise<CompanySignal[]> {
   const res = await apiClient.get<ApiResponse<CompanySignal[]>>(`/api/lists/${id}/member-signals?clientId=${clientId}`);
+  return res.data;
+}
+
+export async function getContactSignals(id: string, clientId: string): Promise<ContactSignal[]> {
+  const res = await apiClient.get<ApiResponse<ContactSignal[]>>(`/api/lists/${id}/contact-signals?clientId=${clientId}`);
   return res.data;
 }
 

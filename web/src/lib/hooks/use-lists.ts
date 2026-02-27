@@ -7,6 +7,7 @@ export const listKeys = {
   detail: (id: string) => ['lists', 'detail', id] as const,
   members: (id: string) => ['lists', 'members', id] as const,
   memberSignals: (id: string) => ['lists', 'member-signals', id] as const,
+  contactSignals: (id: string) => ['lists', 'contact-signals', id] as const,
   funnel: (id: string) => ['lists', 'funnel', id] as const,
   buildStatus: (id: string) => ['lists', 'build-status', id] as const,
 };
@@ -130,14 +131,8 @@ export function useBuildContacts() {
 }
 
 export function useRunPersonaSignals() {
-  const qc = useQueryClient();
   return useMutation({
     mutationFn: listsApi.runPersonaSignals,
-    onSuccess: (_, listId) => {
-      qc.invalidateQueries({ queryKey: ['lists'] });
-      qc.invalidateQueries({ queryKey: ['jobs'] });
-      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
-    },
   });
 }
 
@@ -145,6 +140,15 @@ export function useMemberSignals(listId: string | null, clientId: string | null)
   return useQuery({
     queryKey: listKeys.memberSignals(listId!),
     queryFn: () => listsApi.getMemberSignals(listId!, clientId!),
+    enabled: !!listId && !!clientId,
+    staleTime: 30 * 1000,
+  });
+}
+
+export function useContactSignals(listId: string | null, clientId: string | null) {
+  return useQuery({
+    queryKey: listKeys.contactSignals(listId!),
+    queryFn: () => listsApi.getContactSignals(listId!, clientId!),
     enabled: !!listId && !!clientId,
     staleTime: 30 * 1000,
   });

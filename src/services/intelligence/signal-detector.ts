@@ -61,8 +61,8 @@ export class SignalDetector {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
 
-  constructor(anthropicApiKey: string) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  constructor(anthropicClient: Anthropic) {
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {
@@ -73,13 +73,41 @@ export class SignalDetector {
    * Detect buying signals from an enriched company.
    * Combines rule-based detection from structured data with
    * LLM-based detection for subtle intent signals.
+   * Skips companies that already have non-expired signals (returns existing ones).
    */
   async detectSignals(
     clientId: string,
     company: UnifiedCompany,
     companyId: string,
     clientContext?: { products?: string[]; industry?: string },
+    options?: { skipIfExisting?: boolean },
   ): Promise<DetectedSignal[]> {
+    const skipIfExisting = options?.skipIfExisting ?? true;
+
+    // Check for existing non-expired signals
+    if (skipIfExisting) {
+      const db = getDb();
+      const now = new Date();
+      const existing = await db
+        .select()
+        .from(schema.companySignals)
+        .where(and(
+          eq(schema.companySignals.companyId, companyId),
+          eq(schema.companySignals.clientId, clientId),
+          gte(schema.companySignals.expiresAt, now),
+        ));
+
+      if (existing.length > 0) {
+        return existing.map(row => ({
+          signalType: row.signalType,
+          signalStrength: Number(row.signalStrength),
+          evidence: (row.signalData as SignalData).evidence,
+          source: row.source,
+          details: (row.signalData as SignalData).details,
+        }));
+      }
+    }
+
     const signals: DetectedSignal[] = [];
 
     // Rule-based signals from structured data

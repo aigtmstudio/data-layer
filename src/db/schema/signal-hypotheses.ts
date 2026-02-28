@@ -18,6 +18,7 @@ export const signalHypotheses = pgTable('signal_hypotheses', {
   validatedBy: hypothesisValidationEnum('validated_by').notNull().default('llm_generated'),
   metadata: jsonb('metadata').$type<Record<string, unknown>>().default({}),
 
+  lastSearchedAt: timestamp('last_searched_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [

@@ -89,8 +89,8 @@ export class MarketSignalProcessor {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
 
-  constructor(anthropicApiKey: string) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  constructor(anthropicClient: Anthropic) {
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {
@@ -184,90 +184,102 @@ export class MarketSignalProcessor {
         ? hypotheses.map((h, i) => `[${i}] ${h.hypothesis} (category: ${h.signalCategory})`).join('\n')
         : 'No hypotheses defined. Classify the signal by category only.';
 
-      // Classify each signal
-      for (const signal of signals) {
-        try {
-          const userMessage = `## Signal\nHeadline: ${signal.headline}\n${signal.summary ? `Summary: ${signal.summary}` : ''}\n${signal.sourceName ? `Source: ${signal.sourceName}` : ''}\n\n## Active Hypotheses\n${hypothesesContext}`;
+      // Classify signals in parallel (concurrency of 5)
+      let classificationPrompt = CLASSIFICATION_PROMPT;
+      if (this.promptConfig) {
+        try { classificationPrompt = await this.promptConfig.getPrompt('signal.market.classification.system'); } catch { /* use default */ }
+      }
 
-          let classificationPrompt = CLASSIFICATION_PROMPT;
-          if (this.promptConfig) {
-            try { classificationPrompt = await this.promptConfig.getPrompt('signal.market.classification.system'); } catch { /* use default */ }
+      const CLASSIFY_CONCURRENCY = 5;
+      for (let si = 0; si < signals.length; si += CLASSIFY_CONCURRENCY) {
+        const signalBatch = signals.slice(si, si + CLASSIFY_CONCURRENCY);
+        const results = await Promise.allSettled(
+          signalBatch.map(async (signal) => {
+            const userMessage = `## Signal\nHeadline: ${signal.headline}\n${signal.summary ? `Summary: ${signal.summary}` : ''}\n${signal.sourceName ? `Source: ${signal.sourceName}` : ''}\n\n## Active Hypotheses\n${hypothesesContext}`;
+
+            const message = await this.anthropic.messages.create({
+              model: 'claude-haiku-4-5-20251001',
+              max_tokens: 512,
+              system: classificationPrompt,
+              messages: [{ role: 'user', content: userMessage }],
+            });
+
+            const textBlock = message.content.find(b => b.type === 'text');
+            if (!textBlock?.text) {
+              log.warn({ signalId: signal.id }, 'No text response from classification');
+              return null;
+            }
+
+            const cleaned = textBlock.text.replace(/```json\n?|\n?```/g, '').trim();
+            const classification = JSON.parse(cleaned) as {
+              hypothesisIndex: number;
+              relevanceScore: number;
+              signalCategory: string;
+              affectedSegments: string[];
+              reasoning: string;
+            };
+
+            const matchedHypothesis = classification.hypothesisIndex >= 0 && classification.hypothesisIndex < hypotheses.length
+              ? hypotheses[classification.hypothesisIndex]
+              : null;
+
+            // Validate category
+            const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
+            const category = validCategories.includes(classification.signalCategory as typeof validCategories[number])
+              ? classification.signalCategory as typeof validCategories[number]
+              : null;
+
+            // Update signal with classification
+            await db
+              .update(schema.marketSignals)
+              .set({
+                hypothesisId: matchedHypothesis?.id ?? null,
+                signalCategory: category,
+                relevanceScore: String(Math.max(0, Math.min(1, classification.relevanceScore)).toFixed(2)),
+                affectedSegments: classification.affectedSegments ?? [],
+                processed: true,
+                processedAt: new Date(),
+              })
+              .where(eq(schema.marketSignals.id, signal.id));
+
+            // If high relevance, promote companies from TAM to active_segment
+            if (classification.relevanceScore >= 0.7 && classification.affectedSegments?.length > 0) {
+              await this.promoteCompanies(
+                cId, classification.affectedSegments, signal.id,
+                matchedHypothesis?.id, classification.relevanceScore,
+                { headline: signal.headline, summary: signal.summary ?? undefined, category: classification.signalCategory },
+              );
+            }
+
+            log.debug({
+              signalId: signal.id,
+              relevance: classification.relevanceScore,
+              matchedHypothesis: matchedHypothesis?.id,
+              category,
+            }, 'Signal classified');
+
+            return signal.id;
+          }),
+        );
+
+        for (let ri = 0; ri < results.length; ri++) {
+          const settled = results[ri];
+          if (settled.status === 'fulfilled') {
+            processedCount++;
+          } else {
+            const signal = signalBatch[ri];
+            log.error({ error: settled.reason, signalId: signal.id }, 'Failed to classify signal');
+            // Mark as processed to avoid retry loops; set low relevance
+            await db
+              .update(schema.marketSignals)
+              .set({
+                processed: true,
+                processedAt: new Date(),
+                relevanceScore: '0.00',
+              })
+              .where(eq(schema.marketSignals.id, signal.id));
+            processedCount++;
           }
-
-          const message = await this.anthropic.messages.create({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 512,
-            system: classificationPrompt,
-            messages: [{ role: 'user', content: userMessage }],
-          });
-
-          const textBlock = message.content.find(b => b.type === 'text');
-          if (!textBlock?.text) {
-            log.warn({ signalId: signal.id }, 'No text response from classification');
-            continue;
-          }
-
-          const cleaned = textBlock.text.replace(/```json\n?|\n?```/g, '').trim();
-          const classification = JSON.parse(cleaned) as {
-            hypothesisIndex: number;
-            relevanceScore: number;
-            signalCategory: string;
-            affectedSegments: string[];
-            reasoning: string;
-          };
-
-          const matchedHypothesis = classification.hypothesisIndex >= 0 && classification.hypothesisIndex < hypotheses.length
-            ? hypotheses[classification.hypothesisIndex]
-            : null;
-
-          // Validate category
-          const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
-          const category = validCategories.includes(classification.signalCategory as typeof validCategories[number])
-            ? classification.signalCategory as typeof validCategories[number]
-            : null;
-
-          // Update signal with classification
-          await db
-            .update(schema.marketSignals)
-            .set({
-              hypothesisId: matchedHypothesis?.id ?? null,
-              signalCategory: category,
-              relevanceScore: String(Math.max(0, Math.min(1, classification.relevanceScore)).toFixed(2)),
-              affectedSegments: classification.affectedSegments ?? [],
-              processed: true,
-              processedAt: new Date(),
-            })
-            .where(eq(schema.marketSignals.id, signal.id));
-
-          processedCount++;
-
-          // If high relevance, promote companies from TAM to active_segment
-          if (classification.relevanceScore >= 0.7 && classification.affectedSegments?.length > 0) {
-            await this.promoteCompanies(
-              cId, classification.affectedSegments, signal.id,
-              matchedHypothesis?.id, classification.relevanceScore,
-              { headline: signal.headline, summary: signal.summary ?? undefined, category: classification.signalCategory },
-            );
-          }
-
-          log.debug({
-            signalId: signal.id,
-            relevance: classification.relevanceScore,
-            matchedHypothesis: matchedHypothesis?.id,
-            category,
-          }, 'Signal classified');
-        } catch (error) {
-          log.error({ error, signalId: signal.id }, 'Failed to classify signal');
-          // Mark as processed to avoid retry loops; set low relevance
-          await db
-            .update(schema.marketSignals)
-            .set({
-              processed: true,
-              processedAt: new Date(),
-              relevanceScore: '0.00',
-            })
-            .where(eq(schema.marketSignals.id, signal.id));
-          processedCount++;
         }
       }
     }

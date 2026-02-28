@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 import type { ExaProvider } from '../../providers/exa/index.js';
@@ -40,11 +40,11 @@ export class MarketSignalSearcher {
   private log = logger.child({ service: 'market-signal-searcher' });
 
   constructor(
-    anthropicApiKey: string,
+    anthropicClient: Anthropic,
     marketSignalProcessor: MarketSignalProcessor,
     providers: { exa?: ExaProvider; tavily?: TavilyProvider },
   ) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.anthropic = anthropicClient;
     this.marketSignalProcessor = marketSignalProcessor;
     this.exaProvider = providers.exa;
     this.tavilyProvider = providers.tavily;
@@ -57,13 +57,16 @@ export class MarketSignalSearcher {
   /**
    * Search for real-world evidence for active market hypotheses.
    * For each hypothesis, generates search queries and ingests results as market signals.
+   * Skips hypotheses searched within the cooldown window (default 24h).
+   * Deduplicates results against existing signals by sourceUrl.
    */
   async searchForEvidence(
     clientId: string,
-    options?: { hypothesisIds?: string[]; maxSearchesPerHypothesis?: number },
+    options?: { hypothesisIds?: string[]; maxSearchesPerHypothesis?: number; cooldownHours?: number },
   ): Promise<EvidenceSearchResult> {
     const db = getDb();
     const maxSearches = options?.maxSearchesPerHypothesis ?? 2;
+    const cooldownHours = options?.cooldownHours ?? 24;
     const result: EvidenceSearchResult = { hypothesesSearched: 0, searchesPerformed: 0, signalsIngested: 0 };
 
     // Load active market hypotheses
@@ -88,21 +91,66 @@ export class MarketSignalSearcher {
       return result;
     }
 
-    this.log.info({ count: hypotheses.length, clientId }, 'Searching for evidence');
+    // Skip hypotheses searched within the cooldown window
+    const cooldownCutoff = new Date(Date.now() - cooldownHours * 60 * 60 * 1000);
+    const beforeCount = hypotheses.length;
+    hypotheses = hypotheses.filter(h => !h.lastSearchedAt || h.lastSearchedAt < cooldownCutoff);
 
-    for (const hypothesis of hypotheses) {
-      try {
-        // Generate search queries from the hypothesis
-        const queries = await this.generateSearchQueries(hypothesis, maxSearches);
+    if (hypotheses.length < beforeCount) {
+      this.log.info(
+        { skipped: beforeCount - hypotheses.length, remaining: hypotheses.length, cooldownHours },
+        'Skipped recently-searched hypotheses',
+      );
+    }
+
+    if (hypotheses.length === 0) {
+      this.log.info({ clientId }, 'All hypotheses searched within cooldown window');
+      return result;
+    }
+
+    // Pre-load existing sourceUrls for this client to deduplicate
+    const existingSignals = await db
+      .select({ sourceUrl: schema.marketSignals.sourceUrl })
+      .from(schema.marketSignals)
+      .where(eq(schema.marketSignals.clientId, clientId));
+    const existingUrls = new Set(existingSignals.map(s => s.sourceUrl).filter((u): u is string => !!u));
+
+    this.log.info({ count: hypotheses.length, existingUrls: existingUrls.size, clientId }, 'Searching for evidence');
+
+    // Process hypotheses in parallel (concurrency of 3 to respect rate limits)
+    const CONCURRENCY = 3;
+    for (let i = 0; i < hypotheses.length; i += CONCURRENCY) {
+      const batch = hypotheses.slice(i, i + CONCURRENCY);
+      const batchResults = await Promise.allSettled(
+        batch.map(async (hypothesis) => {
+          const queries = await this.generateSearchQueries(hypothesis, maxSearches);
+          let searched = 0;
+          let ingested = 0;
+
+          for (const query of queries) {
+            const count = await this.executeSearch(clientId, query, hypothesis.id, existingUrls);
+            searched++;
+            ingested += count;
+          }
+
+          // Update lastSearchedAt
+          await db
+            .update(schema.signalHypotheses)
+            .set({ lastSearchedAt: new Date(), updatedAt: new Date() })
+            .where(eq(schema.signalHypotheses.id, hypothesis.id));
+
+          return { searched, ingested };
+        }),
+      );
+
+      for (const settled of batchResults) {
         result.hypothesesSearched++;
-
-        for (const query of queries) {
-          const signals = await this.executeSearch(clientId, query, hypothesis.id);
-          result.searchesPerformed++;
-          result.signalsIngested += signals;
+        if (settled.status === 'fulfilled') {
+          result.searchesPerformed += settled.value.searched;
+          result.signalsIngested += settled.value.ingested;
+        } else {
+          this.log.error({ error: settled.reason }, 'Failed to search for hypothesis evidence');
         }
-      } catch (error) {
-        this.log.error({ error, hypothesisId: hypothesis.id }, 'Failed to search for hypothesis evidence');
       }
     }
 
@@ -153,6 +201,7 @@ Affected Segments: ${segments}`;
     clientId: string,
     query: string,
     hypothesisId: string,
+    existingUrls?: Set<string>,
   ): Promise<number> {
     const log = this.log.child({ query, hypothesisId });
 
@@ -169,18 +218,26 @@ Affected Segments: ${segments}`;
         });
 
         if (response.results?.length > 0) {
-          const signals = response.results.map(r => ({
-            clientId,
-            headline: r.title ?? query,
-            summary: r.text?.slice(0, 500),
-            sourceUrl: r.url,
-            sourceName: 'exa_news_search',
-            rawData: { hypothesisId, searchQuery: query, exaScore: r.score },
-            detectedAt: r.publishedDate,
-          }));
+          const signals = response.results
+            .filter(r => !r.url || !existingUrls?.has(r.url))
+            .map(r => ({
+              clientId,
+              headline: r.title ?? query,
+              summary: r.text?.slice(0, 500),
+              sourceUrl: r.url,
+              sourceName: 'exa_news_search',
+              rawData: { hypothesisId, searchQuery: query, exaScore: r.score },
+              detectedAt: r.publishedDate,
+            }));
 
-          await this.marketSignalProcessor.ingestBatch(signals);
-          log.info({ count: signals.length, provider: 'exa' }, 'Ingested search results');
+          if (signals.length > 0) {
+            // Add to dedup set for subsequent searches in this run
+            for (const s of signals) {
+              if (s.sourceUrl) existingUrls?.add(s.sourceUrl);
+            }
+            await this.marketSignalProcessor.ingestBatch(signals);
+          }
+          log.info({ count: signals.length, filtered: response.results.length - signals.length, provider: 'exa' }, 'Ingested search results');
           return signals.length;
         }
       } catch (error) {
@@ -194,17 +251,24 @@ Affected Segments: ${segments}`;
         const response = await this.tavilyProvider.searchNews({ query, maxResults: 5 });
 
         if (response.results?.length > 0) {
-          const signals = response.results.map(r => ({
-            clientId,
-            headline: r.title ?? query,
-            summary: r.content?.slice(0, 500),
-            sourceUrl: r.url,
-            sourceName: 'tavily_news_search',
-            rawData: { hypothesisId, searchQuery: query, tavilyScore: r.score },
-          }));
+          const signals = response.results
+            .filter(r => !r.url || !existingUrls?.has(r.url))
+            .map(r => ({
+              clientId,
+              headline: r.title ?? query,
+              summary: r.content?.slice(0, 500),
+              sourceUrl: r.url,
+              sourceName: 'tavily_news_search',
+              rawData: { hypothesisId, searchQuery: query, tavilyScore: r.score },
+            }));
 
-          await this.marketSignalProcessor.ingestBatch(signals);
-          log.info({ count: signals.length, provider: 'tavily' }, 'Ingested search results');
+          if (signals.length > 0) {
+            for (const s of signals) {
+              if (s.sourceUrl) existingUrls?.add(s.sourceUrl);
+            }
+            await this.marketSignalProcessor.ingestBatch(signals);
+          }
+          log.info({ count: signals.length, filtered: response.results.length - signals.length, provider: 'tavily' }, 'Ingested search results');
           return signals.length;
         }
       } catch (error) {

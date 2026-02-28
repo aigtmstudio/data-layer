@@ -9,6 +9,7 @@ import type { SignalDetector } from '../intelligence/signal-detector.js';
 import type { IntelligenceScorer } from '../intelligence/intelligence-scorer.js';
 import type { ClientProfileService } from '../intelligence/client-profile.js';
 import type { PersonaSignalDetector } from '../intelligence/persona-signal-detector.js';
+import type { EngagementBriefGenerator } from '../intelligence/engagement-brief-generator.js';
 import type { EmploymentRecord } from '../../db/schema/contacts.js';
 import type { EnrichmentPipeline } from '../enrichment/index.js';
 import { NotFoundError } from '../../lib/errors.js';
@@ -21,6 +22,7 @@ export class ListBuilder {
   private intelligenceScorer?: IntelligenceScorer;
   private clientProfileService?: ClientProfileService;
   private personaSignalDetector?: PersonaSignalDetector;
+  private engagementBriefGenerator?: EngagementBriefGenerator;
   private enrichmentPipeline?: EnrichmentPipeline;
 
   setEnrichmentPipeline(pipeline: EnrichmentPipeline): void {
@@ -45,6 +47,24 @@ export class ListBuilder {
 
   setPersonaSignalDetector(detector: PersonaSignalDetector): void {
     this.personaSignalDetector = detector;
+  }
+
+  setEngagementBriefGenerator(generator: EngagementBriefGenerator): void {
+    this.engagementBriefGenerator = generator;
+  }
+
+  async generateBriefs(listId: string, options?: {
+    forceRegenerate?: boolean;
+    personaScoreThreshold?: number;
+  }) {
+    if (!this.engagementBriefGenerator) {
+      throw new Error('EngagementBriefGenerator not configured');
+    }
+    return this.engagementBriefGenerator.generateBriefsForList({
+      listId,
+      forceRegenerate: options?.forceRegenerate,
+      personaScoreThreshold: options?.personaScoreThreshold,
+    });
   }
   async buildList(params: {
     clientId: string;
@@ -186,27 +206,38 @@ export class ListBuilder {
       const companyIds = scored.map(s => s.company.id);
       const existingSignals = await this.signalDetector!.getSignalsForCompanies(params.clientId, companyIds);
 
-      // Detect signals for companies that don't have any yet
-      for (const { company } of scored) {
-        if (!existingSignals.has(company.id)) {
-          const companyData: UnifiedCompany = {
-            name: company.name,
-            domain: company.domain ?? undefined,
-            industry: company.industry ?? undefined,
-            description: company.description ?? undefined,
-            employeeCount: company.employeeCount ?? undefined,
-            employeeRange: company.employeeRange ?? undefined,
-            techStack: (company.techStack as string[]) ?? [],
-            latestFundingStage: company.latestFundingStage ?? undefined,
-            totalFunding: company.totalFunding != null ? Number(company.totalFunding) : undefined,
-            country: company.country ?? undefined,
-            externalIds: {},
-          };
+      // Detect signals for companies that don't have any yet (parallel, concurrency of 5)
+      const needsDetection = scored.filter(s => !existingSignals.has(s.company.id));
+      const SIGNAL_CONCURRENCY = 5;
+      for (let si = 0; si < needsDetection.length; si += SIGNAL_CONCURRENCY) {
+        const batch = needsDetection.slice(si, si + SIGNAL_CONCURRENCY);
+        const results = await Promise.allSettled(
+          batch.map(async ({ company }) => {
+            const companyData: UnifiedCompany = {
+              name: company.name,
+              domain: company.domain ?? undefined,
+              industry: company.industry ?? undefined,
+              description: company.description ?? undefined,
+              employeeCount: company.employeeCount ?? undefined,
+              employeeRange: company.employeeRange ?? undefined,
+              techStack: (company.techStack as string[]) ?? [],
+              latestFundingStage: company.latestFundingStage ?? undefined,
+              totalFunding: company.totalFunding != null ? Number(company.totalFunding) : undefined,
+              country: company.country ?? undefined,
+              externalIds: {},
+            };
 
-          const signals = await this.signalDetector!.detectSignals(
-            params.clientId, companyData, company.id, clientContext,
-          );
-          existingSignals.set(company.id, signals);
+            const signals = await this.signalDetector!.detectSignals(
+              params.clientId, companyData, company.id, clientContext,
+            );
+            return { companyId: company.id, signals };
+          }),
+        );
+
+        for (const settled of results) {
+          if (settled.status === 'fulfilled') {
+            existingSignals.set(settled.value.companyId, settled.value.signals);
+          }
         }
       }
 
@@ -580,58 +611,72 @@ export class ListBuilder {
     let totalSignals = 0;
     const companyIdsToQualify: string[] = [];
 
-    for (const member of activeMembers) {
-      const company = member.company;
-      const companyData: UnifiedCompany = {
-        name: company.name,
-        domain: company.domain ?? undefined,
-        industry: company.industry ?? undefined,
-        description: company.description ?? undefined,
-        websiteProfile: company.websiteProfile ?? undefined,
-        employeeCount: company.employeeCount ?? undefined,
-        employeeRange: company.employeeRange ?? undefined,
-        techStack: (company.techStack as string[]) ?? [],
-        latestFundingStage: company.latestFundingStage ?? undefined,
-        totalFunding: company.totalFunding != null ? Number(company.totalFunding) : undefined,
-        country: company.country ?? undefined,
-        annualRevenue: company.annualRevenue != null ? Number(company.annualRevenue) : undefined,
-        foundedYear: company.foundedYear ?? undefined,
-        externalIds: {},
-      };
+    // Process signal detection in parallel (concurrency of 5)
+    const DETECT_CONCURRENCY = 5;
+    for (let mi = 0; mi < activeMembers.length; mi += DETECT_CONCURRENCY) {
+      const memberBatch = activeMembers.slice(mi, mi + DETECT_CONCURRENCY);
+      const results = await Promise.allSettled(
+        memberBatch.map(async (member) => {
+          const company = member.company;
+          const companyData: UnifiedCompany = {
+            name: company.name,
+            domain: company.domain ?? undefined,
+            industry: company.industry ?? undefined,
+            description: company.description ?? undefined,
+            websiteProfile: company.websiteProfile ?? undefined,
+            employeeCount: company.employeeCount ?? undefined,
+            employeeRange: company.employeeRange ?? undefined,
+            techStack: (company.techStack as string[]) ?? [],
+            latestFundingStage: company.latestFundingStage ?? undefined,
+            totalFunding: company.totalFunding != null ? Number(company.totalFunding) : undefined,
+            country: company.country ?? undefined,
+            annualRevenue: company.annualRevenue != null ? Number(company.annualRevenue) : undefined,
+            foundedYear: company.foundedYear ?? undefined,
+            externalIds: {},
+          };
 
-      // Detect signals
-      const signals = await this.signalDetector.detectSignals(
-        list.clientId, companyData, company.id, clientContext,
+          // Detect signals (force re-detection since we cleared previous signals above)
+          const signals = await this.signalDetector!.detectSignals(
+            list.clientId, companyData, company.id, clientContext, { skipIfExisting: false },
+          );
+
+          // Compute composite scores
+          const sources = (company.sources as SourceRecord[]) ?? [];
+          const scoreResult = this.intelligenceScorer!.scoreCompany(
+            companyData, icpFilters, signals, sources, sources.length,
+          );
+
+          // Update list member with scores
+          await db
+            .update(schema.listMembers)
+            .set({
+              signalScore: String(scoreResult.signalScore),
+              intelligenceScore: String(scoreResult.intelligenceScore),
+              addedReason: scoreResult.reasons.length > 0
+                ? scoreResult.reasons.slice(0, 5).join('; ')
+                : undefined,
+            })
+            .where(eq(schema.listMembers.id, member.memberId));
+
+          return { signals, scoreResult, companyId: company.id };
+        }),
       );
-      totalSignals += signals.length;
 
-      // Compute composite scores
-      const sources = (company.sources as SourceRecord[]) ?? [];
-      const result = this.intelligenceScorer.scoreCompany(
-        companyData, icpFilters, signals, sources, sources.length,
-      );
+      for (const settled of results) {
+        if (settled.status === 'fulfilled') {
+          const { signals, scoreResult, companyId } = settled.value;
+          totalSignals += signals.length;
 
-      // Update list member with scores
-      await db
-        .update(schema.listMembers)
-        .set({
-          signalScore: String(result.signalScore),
-          intelligenceScore: String(result.intelligenceScore),
-          addedReason: result.reasons.length > 0
-            ? result.reasons.slice(0, 5).join('; ')
-            : undefined,
-        })
-        .where(eq(schema.listMembers.id, member.memberId));
-
-      // Qualify companies with sufficient signals
-      // Require genuine evidence: a single very strong signal (>=0.8),
-      // multiple strong signals (2+ at >=0.7), or high composite score (>=0.6)
-      const strongSignals = signals.filter(s => s.signalStrength >= 0.7);
-      const hasVeryStrongSignal = signals.some(s => s.signalStrength >= 0.8);
-      const hasMultipleStrong = strongSignals.length >= 2;
-      if (hasVeryStrongSignal || hasMultipleStrong || result.signalScore >= 0.6) {
-        companyIdsToQualify.push(company.id);
-        qualified++;
+          const strongSignals = signals.filter(s => s.signalStrength >= 0.7);
+          const hasVeryStrongSignal = signals.some(s => s.signalStrength >= 0.8);
+          const hasMultipleStrong = strongSignals.length >= 2;
+          if (hasVeryStrongSignal || hasMultipleStrong || scoreResult.signalScore >= 0.6) {
+            companyIdsToQualify.push(companyId);
+            qualified++;
+          }
+        } else {
+          logger.error({ error: settled.reason }, 'Failed to detect signals for company');
+        }
       }
     }
 

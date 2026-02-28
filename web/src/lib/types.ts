@@ -200,7 +200,8 @@ export type JobType =
   | 'persona_signal_detection'
   | 'deep_enrichment'
   | 'market_signal_search'
-  | 'brief_generation';
+  | 'brief_generation'
+  | 'buzz_generation';
 
 export interface Job {
   id: string;

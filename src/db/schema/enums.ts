@@ -20,6 +20,7 @@ export const jobTypeEnum = pgEnum('job_type', [
   'deep_enrichment',
   'market_signal_search',
   'brief_generation',
+  'buzz_generation',
 ]);
 
 export const creditTransactionTypeEnum = pgEnum('credit_transaction_type', [

@@ -121,6 +121,7 @@ const SERVICE_OPERATION_MAP: Record<string, string> = {
   'hypothesis-generator': 'hypothesis_generation',
   'icp-parser': 'icp_parsing',
   'company-discovery': 'company_discovery',
+  'market-buzz': 'buzz_generation',
 };
 
 function inferOperation(service: string, _params: Anthropic.MessageCreateParamsNonStreaming): string {

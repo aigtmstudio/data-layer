@@ -23,6 +23,7 @@ import {
   DeepEnrichmentService,
   MarketSignalSearcher,
   EngagementBriefGenerator,
+  MarketBuzzGenerator,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -69,6 +70,8 @@ export interface ServiceContainer {
   marketSignalSearcher?: MarketSignalSearcher;
   // Engagement briefs
   engagementBriefGenerator: EngagementBriefGenerator;
+  // Market buzz
+  marketBuzzGenerator: MarketBuzzGenerator;
 }
 
 let container: ServiceContainer;
@@ -119,6 +122,7 @@ async function main() {
     marketSignalSearcher: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'market-signal-searcher' }),
     deepEnrichment: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'deep-enrichment' }),
     engagementBrief: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'engagement-brief' }),
+    marketBuzz: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'market-buzz' }),
     personaSignal: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'persona-signal-detector' }),
     clientProfile: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'client-profile' }),
     strategyGenerator: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'strategy-generator' }),
@@ -177,6 +181,10 @@ async function main() {
   engagementBriefGenerator.setPromptConfig(promptConfigService);
   listBuilder.setEngagementBriefGenerator(engagementBriefGenerator);
 
+  // Market buzz
+  const marketBuzzGenerator = new MarketBuzzGenerator(llm.marketBuzz, clientProfileService);
+  marketBuzzGenerator.setPromptConfig(promptConfigService);
+
   // Deep enrichment + evidence search (optional, depend on API keys)
   let deepEnrichmentService: DeepEnrichmentService | undefined;
   let marketSignalSearcher: MarketSignalSearcher | undefined;
@@ -220,6 +228,7 @@ async function main() {
     deepEnrichmentService,
     marketSignalSearcher,
     engagementBriefGenerator,
+    marketBuzzGenerator,
   };
 
   // 5. Start scheduler with handlers

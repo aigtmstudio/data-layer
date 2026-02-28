@@ -4,6 +4,7 @@ import type { SourceRecord } from '../../db/schema/companies.js';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import { getProviderOriginalityWeight, SIGNAL_DEFINITIONS } from './provider-knowledge.js';
 import type { DetectedSignal } from './signal-detector.js';
+import { applyTimeliness } from './timeliness.js';
 
 export interface ScoringWeights {
   icpFit: number;
@@ -113,7 +114,8 @@ export class IntelligenceScorer {
         ?? SIGNAL_DEFINITIONS[signal.signalType]?.defaultWeight
         ?? 0.5;
 
-      weightedSum += signal.signalStrength * priority;
+      const adjustedStrength = applyTimeliness(signal.signalStrength, signal.eventDate ?? (signal.details as Record<string, unknown>)?.eventDate as string | undefined);
+      weightedSum += adjustedStrength * priority;
       totalWeight += priority;
     }
 

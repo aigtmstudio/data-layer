@@ -1129,6 +1129,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       toast.success('Applying market signals — enriching profiles, searching for evidence, and classifying...');
     } catch {
       toast.error('Failed to apply market signals');
+    } finally {
       setApplyingSignals(false);
     }
   };
@@ -1241,9 +1242,11 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
               {briefGenRunning ? 'Generating briefs...' : 'Generate Briefs'}
             </Button>
             {hasMembers && (
-              <Button variant="outline" onClick={handleExport}>
-                <Download className="mr-2 h-4 w-4" />
-                Export
+              <Button variant="outline" onClick={handleExport} disabled={triggerExport.isPending}>
+                {triggerExport.isPending
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Download className="mr-2 h-4 w-4" />}
+                {triggerExport.isPending ? 'Exporting...' : 'Export'}
               </Button>
             )}
             <Button variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
@@ -1355,7 +1358,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
               disabled={isBuildingList}
               variant={hasMembers ? 'outline' : 'default'}
             >
-              <Play className="mr-2 h-4 w-4" />
+              {isBuildingList
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <Play className="mr-2 h-4 w-4" />}
               {isBuildingList ? 'Building...' : hasMembers ? 'Rebuild' : 'Build List'}
             </Button>
           )}
@@ -1366,7 +1371,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 disabled={applyMarketSignals.isPending || applyingSignals}
                 variant="default"
               >
-                <Radar className="mr-2 h-4 w-4" />
+                {applyMarketSignals.isPending || applyingSignals
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Radar className="mr-2 h-4 w-4" />}
                 {applyMarketSignals.isPending || applyingSignals ? 'Applying...' : 'Apply Market Signals'}
               </Button>
               <Button variant="outline" onClick={openScheduleDialog}>
@@ -1374,12 +1381,16 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 Schedule
               </Button>
               <Button variant="outline" onClick={handleRefresh} disabled={refreshList.isPending}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
+                {refreshList.isPending
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <RefreshCw className="mr-2 h-4 w-4" />}
+                {refreshList.isPending ? 'Refreshing...' : 'Refresh'}
               </Button>
-              <Button variant="outline" onClick={handleExport}>
-                <Download className="mr-2 h-4 w-4" />
-                Export
+              <Button variant="outline" onClick={handleExport} disabled={triggerExport.isPending}>
+                {triggerExport.isPending
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Download className="mr-2 h-4 w-4" />}
+                {triggerExport.isPending ? 'Exporting...' : 'Export'}
               </Button>
             </>
           )}
@@ -1483,7 +1494,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 disabled={applyMarketSignals.isPending || applyingSignals}
                 size="sm"
               >
-                <Radar className="mr-2 h-4 w-4" />
+                {applyMarketSignals.isPending || applyingSignals
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Radar className="mr-2 h-4 w-4" />}
                 {applyMarketSignals.isPending || applyingSignals ? 'Applying...' : 'Apply Market Signals'}
               </Button>
             )}
@@ -1493,7 +1506,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 disabled={runCompanySignals.isPending}
                 size="sm"
               >
-                <Zap className="mr-2 h-4 w-4" />
+                {runCompanySignals.isPending
+                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  : <Zap className="mr-2 h-4 w-4" />}
                 {runCompanySignals.isPending ? 'Running...' : 'Run Company Signals'}
               </Button>
             )}
@@ -1505,16 +1520,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                   disabled={runCompanySignals.isPending}
                   size="sm"
                 >
-                  <Zap className="mr-2 h-4 w-4" />
+                  {runCompanySignals.isPending
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <Zap className="mr-2 h-4 w-4" />}
                   {runCompanySignals.isPending ? 'Re-evaluating...' : 'Re-run Signals'}
                 </Button>
                 <Button onClick={openBuyingCommitteeDialog} size="sm">
                   <Users className="mr-2 h-4 w-4" />
                   Find Buying Committee
                 </Button>
-                <Button variant="outline" onClick={handleExport} size="sm">
-                  <Download className="mr-2 h-4 w-4" />
-                  Export Qualified
+                <Button variant="outline" onClick={handleExport} size="sm" disabled={triggerExport.isPending}>
+                  {triggerExport.isPending
+                    ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    : <Download className="mr-2 h-4 w-4" />}
+                  {triggerExport.isPending ? 'Exporting...' : 'Export Qualified'}
                 </Button>
               </>
             )}

@@ -13,6 +13,7 @@ export interface DetectedSignal {
   evidence: string;
   source: string;
   details?: Record<string, unknown>;
+  eventDate?: string;
 }
 
 export const LLM_SIGNAL_PROMPT = `You are analyzing company data to detect buying signals. The data comes from multiple sources, each labelled with its provenance (e.g. [enrichment provider], [company website: domain.com]).
@@ -31,7 +32,8 @@ For each signal, return JSON array:
   "signalType": "expansion" | "pain_point_detected" | "competitive_displacement" | "new_product_launch" | "growth_momentum",
   "signalStrength": 0.0-1.0,
   "evidence": "1-2 sentences citing the SPECIFIC fact and its source tag",
-  "sourceTag": "enrichment provider" | "company website" | "funding data"
+  "sourceTag": "enrichment provider" | "company website" | "funding data",
+  "estimatedEventDate": "YYYY-MM-DD or null"
 }]
 
 Rules:
@@ -39,6 +41,14 @@ Rules:
 - NEVER restate claims from [AI-generated analysis] as if they were evidence
 - Every evidence statement MUST reference what was found and where (e.g. "Website lists 5 venue locations [company website]" or "Tech stack includes WordPress, Google Maps [enrichment provider]")
 - Generic industry observations are NOT signals — evidence must be specific to THIS company
+
+TIMELINESS — critical for signal relevance:
+- For each signal, estimate when the underlying event ACTUALLY occurred (not when you are analyzing it). Use YYYY-MM-DD format.
+- Use date clues from the evidence (e.g. "opened in March 2024", "recently raised Series A", "launched last quarter").
+- If no date can be inferred at all, set estimatedEventDate to null.
+- Events older than 12 months are NOT relevant — do NOT include them.
+- Events 6-12 months old should only be included if evidence is very strong (0.9+).
+- Prefer recent signals. A signal from last month is far more valuable than one from 6 months ago.
 
 signalStrength guide:
 - 0.7-0.8: Clear specific evidence from a verifiable source
@@ -104,6 +114,7 @@ export class SignalDetector {
           evidence: (row.signalData as SignalData).evidence,
           source: row.source,
           details: (row.signalData as SignalData).details,
+          eventDate: (row.signalData as SignalData).eventDate ?? undefined,
         }));
       }
     }
@@ -135,13 +146,12 @@ export class SignalDetector {
 
     // Recent funding (within 6 months)
     if (company.latestFundingStage || company.totalFunding) {
-      // If we have a funding date, check recency
-      // Otherwise, if we have funding data at all, it's a moderate signal
       signals.push({
         signalType: 'recent_funding',
         signalStrength: 0.7,
         evidence: `Funding stage: ${company.latestFundingStage ?? 'Unknown'}, Total: $${company.totalFunding ?? 'Unknown'} [funding data]`,
         source: 'funding data',
+        eventDate: company.latestFundingDate ?? undefined,
       });
     }
 
@@ -279,6 +289,7 @@ export class SignalDetector {
           evidence: (s.evidence as string) ?? 'Detected by AI analysis',
           source: (s.sourceTag as string) ?? 'llm_analysis',
           details: s.sourceTag ? { sourceTag: s.sourceTag as string } : undefined,
+          eventDate: (s.estimatedEventDate as string) ?? undefined,
         }));
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
@@ -305,6 +316,7 @@ export class SignalDetector {
       const signalData: SignalData = {
         evidence: signal.evidence,
         details: signal.details,
+        eventDate: signal.eventDate ?? null,
       };
 
       return {
@@ -352,6 +364,7 @@ export class SignalDetector {
         evidence: (row.signalData as SignalData).evidence,
         source: row.source,
         details: (row.signalData as SignalData).details,
+        eventDate: (row.signalData as SignalData).eventDate ?? undefined,
       });
       result.set(row.companyId, signals);
     }

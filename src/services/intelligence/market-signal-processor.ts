@@ -3,6 +3,7 @@ import { getDb, schema } from '../../db/index.js';
 import { eq, and, desc, sql, inArray, isNull, gte } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
+import { computeTimelinessMultiplier } from './timeliness.js';
 
 export const CLASSIFICATION_PROMPT = `You are a market signal classifier. Given a market signal (headline + summary) and a set of active hypotheses, determine:
 
@@ -242,12 +243,23 @@ export class MarketSignalProcessor {
               })
               .where(eq(schema.marketSignals.id, signal.id));
 
-            // If high relevance, promote companies from TAM to active_segment
-            if (classification.relevanceScore >= 0.7 && classification.affectedSegments?.length > 0) {
+            // If high relevance AND recent, promote companies from TAM to active_segment
+            const { multiplier: timeMult, band: timeBand } = computeTimelinessMultiplier(signal.detectedAt);
+            const adjustedRelevance = classification.relevanceScore * timeMult;
+
+            log.debug({
+              signalId: signal.id,
+              rawRelevance: classification.relevanceScore,
+              timeliness: { multiplier: timeMult, band: timeBand },
+              adjustedRelevance,
+            }, 'Timeliness-adjusted relevance');
+
+            if (adjustedRelevance >= 0.7 && classification.affectedSegments?.length > 0) {
               await this.promoteCompanies(
                 cId, classification.affectedSegments, signal.id,
                 matchedHypothesis?.id, classification.relevanceScore,
                 { headline: signal.headline, summary: signal.summary ?? undefined, category: classification.signalCategory },
+                signal.detectedAt ?? undefined,
               );
             }
 
@@ -295,6 +307,7 @@ export class MarketSignalProcessor {
     hypothesisId?: string | null,
     relevanceScore?: number,
     signalContext?: { headline: string; summary?: string; category?: string },
+    signalDetectedAt?: Date,
   ) {
     const db = getDb();
     const log = logger.child({ clientId, signalId, segments: affectedSegments });
@@ -395,7 +408,7 @@ export class MarketSignalProcessor {
         if (!Array.isArray(evaluations)) continue;
 
         for (const evaluation of evaluations) {
-          if (!evaluation.affected || evaluation.confidence < 0.7) continue;
+          if (!evaluation.affected || evaluation.confidence < 0.75) continue;
           if (evaluation.companyIndex < 0 || evaluation.companyIndex >= batch.length) continue;
 
           promotedCompanies.push({
@@ -447,6 +460,7 @@ export class MarketSignalProcessor {
               confidence,
               signalHeadline: signalContext?.headline,
             },
+            eventDate: signalDetectedAt?.toISOString() ?? null,
           },
           source: 'market_signal_processor',
           expiresAt: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000), // 90 days

@@ -131,8 +131,15 @@ export function useBuildContacts() {
 }
 
 export function useRunPersonaSignals() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: listsApi.runPersonaSignals,
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.contactSignals(listId) });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
   });
 }
 
@@ -181,8 +188,14 @@ export function useDeepEnrich() {
 }
 
 export function useGenerateBriefs() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => listsApi.generateBriefs(id),
+    onSuccess: (_, listId) => {
+      qc.invalidateQueries({ queryKey: ['lists'] });
+      qc.invalidateQueries({ queryKey: ['jobs'] });
+      qc.invalidateQueries({ queryKey: listKeys.members(listId) });
+    },
   });
 }
 

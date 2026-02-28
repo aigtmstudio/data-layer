@@ -58,6 +58,7 @@ export interface StrategyData {
 export interface SignalData {
   evidence: string;
   details?: Record<string, unknown>;
+  eventDate?: string | null;
 }
 
 // ── Tables ──

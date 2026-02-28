@@ -13,6 +13,7 @@ import type { EngagementBriefGenerator } from '../intelligence/engagement-brief-
 import type { EmploymentRecord } from '../../db/schema/contacts.js';
 import type { EnrichmentPipeline } from '../enrichment/index.js';
 import { NotFoundError } from '../../lib/errors.js';
+import { applyTimeliness } from '../intelligence/timeliness.js';
 import { logger } from '../../lib/logger.js';
 import { isBlockedDomain, isBlockedCompanyName, isPlausibleCompanyName } from '../company-discovery/index.js';
 
@@ -668,10 +669,14 @@ export class ListBuilder {
           const { signals, scoreResult, companyId } = settled.value;
           totalSignals += signals.length;
 
-          const strongSignals = signals.filter(s => s.signalStrength >= 0.7);
-          const hasVeryStrongSignal = signals.some(s => s.signalStrength >= 0.8);
-          const hasMultipleStrong = strongSignals.length >= 2;
-          if (hasVeryStrongSignal || hasMultipleStrong || scoreResult.signalScore >= 0.6) {
+          // Apply timeliness multiplier: old/undated signals get heavily penalized
+          const adjustedSignals = signals.map(s => ({
+            ...s,
+            adjustedStrength: applyTimeliness(s.signalStrength, s.eventDate ?? (s.details as Record<string, unknown>)?.eventDate as string | undefined),
+          }));
+          const hasVeryStrong = adjustedSignals.some(s => s.adjustedStrength >= 0.85);
+          const hasMultipleStrong = adjustedSignals.filter(s => s.adjustedStrength >= 0.7).length >= 2;
+          if (hasVeryStrong || hasMultipleStrong) {
             companyIdsToQualify.push(companyId);
             qualified++;
           }

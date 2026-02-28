@@ -4,6 +4,7 @@ import { getDb, schema } from '../../db/index.js';
 import { eq } from 'drizzle-orm';
 import type { ServiceContainer } from '../../index.js';
 import { logger } from '../../lib/logger.js';
+import { withLlmContext } from '../../lib/llm-tracker.js';
 
 const ingestBody = z.object({
   clientId: z.string().uuid(),
@@ -118,12 +119,13 @@ export const marketSignalRoutes: FastifyPluginAsync<{ container: ServiceContaine
 
     reply.status(202).send({ data: { jobId: job.id, message: 'Evidence search started' } });
 
-    opts.container.marketSignalSearcher
-      .searchForEvidence(body.clientId, {
-        hypothesisIds: body.hypothesisIds,
-        maxSearchesPerHypothesis: body.maxSearchesPerHypothesis,
-      })
-      .then(async (result) => {
+    withLlmContext({ clientId: body.clientId, jobId: job.id }, () =>
+      opts.container.marketSignalSearcher!
+        .searchForEvidence(body.clientId, {
+          hypothesisIds: body.hypothesisIds,
+          maxSearchesPerHypothesis: body.maxSearchesPerHypothesis,
+        })
+    ).then(async (result) => {
         await db
           .update(schema.jobs)
           .set({
@@ -159,14 +161,16 @@ export const marketSignalRoutes: FastifyPluginAsync<{ container: ServiceContaine
     // Return 202 immediately, process in background
     reply.status(202).send({ data: { message: 'Signal processing started' } });
 
-    try {
-      const processed = await marketSignalProcessor.processUnclassifiedSignals(
-        body.clientId,
-        body.batchSize,
-      );
-      log.info({ processed }, 'Signal processing complete');
-    } catch (error) {
-      log.error({ error }, 'Signal processing failed');
-    }
+    withLlmContext({ clientId: body.clientId }, async () => {
+      try {
+        const processed = await marketSignalProcessor.processUnclassifiedSignals(
+          body.clientId,
+          body.batchSize,
+        );
+        log.info({ processed }, 'Signal processing complete');
+      } catch (error) {
+        log.error({ error }, 'Signal processing failed');
+      }
+    });
   });
 };

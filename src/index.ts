@@ -22,6 +22,7 @@ import {
   PersonaSignalDetector,
   DeepEnrichmentService,
   MarketSignalSearcher,
+  EngagementBriefGenerator,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -39,6 +40,7 @@ import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
 import { JinaProvider } from './providers/jina/index.js';
 import { CompanyDiscoveryService } from './services/company-discovery/index.js';
 import { PromptConfigService } from './services/prompt-config/index.js';
+import { createTrackedAnthropicClient } from './lib/llm-tracker.js';
 import { logger } from './lib/logger.js';
 
 export interface ServiceContainer {
@@ -65,6 +67,8 @@ export interface ServiceContainer {
   // Deep enrichment + evidence search (optional — depend on provider API keys)
   deepEnrichmentService?: DeepEnrichmentService;
   marketSignalSearcher?: MarketSignalSearcher;
+  // Engagement briefs
+  engagementBriefGenerator: EngagementBriefGenerator;
 }
 
 let container: ServiceContainer;
@@ -108,15 +112,30 @@ async function main() {
   if (firecrawlProvider) orchestrator.registerProvider(firecrawlProvider, 12);
   if (config.scrapegraphApiKey) orchestrator.registerProvider(new ScrapeGraphProvider(config.scrapegraphApiKey), 13);
 
+  // Create tracked Anthropic clients (one per service for cost attribution)
+  const llm = {
+    signalDetector: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'signal-detector' }),
+    marketSignalProcessor: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'market-signal-processor' }),
+    marketSignalSearcher: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'market-signal-searcher' }),
+    deepEnrichment: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'deep-enrichment' }),
+    engagementBrief: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'engagement-brief' }),
+    personaSignal: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'persona-signal-detector' }),
+    clientProfile: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'client-profile' }),
+    strategyGenerator: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'strategy-generator' }),
+    hypothesisGenerator: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'hypothesis-generator' }),
+    icpParser: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'icp-parser' }),
+    companyDiscovery: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'company-discovery' }),
+  };
+
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
-  const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline, config.anthropicApiKey);
+  const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline, llm.companyDiscovery);
   discoveryService.setPromptConfig(promptConfigService);
   const listBuilder = new ListBuilder();
   listBuilder.setDiscoveryService(discoveryService);
   listBuilder.setEnrichmentPipeline(enrichmentPipeline);
   // Signal services wired below after construction (see intelligence layer section)
   const exportEngine = new ExportEngine();
-  const icpParser = new IcpParser(config.anthropicApiKey);
+  const icpParser = new IcpParser(llm.icpParser);
   icpParser.setPromptConfig(promptConfigService);
   const documentExtractor = new DocumentExtractor();
   const sourceProcessor = new SourceProcessor(documentExtractor);
@@ -126,12 +145,12 @@ async function main() {
   const performanceTracker = new ProviderPerformanceTracker();
   orchestrator.setPerformanceTracker(performanceTracker);
 
-  const clientProfileService = new ClientProfileService(orchestrator, config.anthropicApiKey);
+  const clientProfileService = new ClientProfileService(orchestrator, llm.clientProfile);
   clientProfileService.setPromptConfig(promptConfigService);
-  const signalDetector = new SignalDetector(config.anthropicApiKey);
+  const signalDetector = new SignalDetector(llm.signalDetector);
   signalDetector.setPromptConfig(promptConfigService);
   const intelligenceScorer = new IntelligenceScorer();
-  const strategyGenerator = new StrategyGenerator(config.anthropicApiKey, clientProfileService, performanceTracker);
+  const strategyGenerator = new StrategyGenerator(llm.strategyGenerator, clientProfileService, performanceTracker);
   strategyGenerator.setPromptConfig(promptConfigService);
   const dynamicOrchestrator = new DynamicOrchestrator(
     orchestrator, strategyGenerator, signalDetector, intelligenceScorer, clientProfileService,
@@ -143,15 +162,20 @@ async function main() {
   listBuilder.setClientProfileService(clientProfileService);
 
   // Signal pipeline
-  const hypothesisGenerator = new HypothesisGenerator(config.anthropicApiKey, clientProfileService);
+  const hypothesisGenerator = new HypothesisGenerator(llm.hypothesisGenerator, clientProfileService);
   hypothesisGenerator.setPromptConfig(promptConfigService);
-  const marketSignalProcessor = new MarketSignalProcessor(config.anthropicApiKey);
+  const marketSignalProcessor = new MarketSignalProcessor(llm.marketSignalProcessor);
   marketSignalProcessor.setPromptConfig(promptConfigService);
-  const personaSignalDetector = new PersonaSignalDetector(config.anthropicApiKey);
+  const personaSignalDetector = new PersonaSignalDetector(llm.personaSignal);
   personaSignalDetector.setPromptConfig(promptConfigService);
 
   // Wire persona signal detector into list builder
   listBuilder.setPersonaSignalDetector(personaSignalDetector);
+
+  // Engagement briefs
+  const engagementBriefGenerator = new EngagementBriefGenerator(llm.engagementBrief);
+  engagementBriefGenerator.setPromptConfig(promptConfigService);
+  listBuilder.setEngagementBriefGenerator(engagementBriefGenerator);
 
   // Deep enrichment + evidence search (optional, depend on API keys)
   let deepEnrichmentService: DeepEnrichmentService | undefined;
@@ -159,14 +183,14 @@ async function main() {
 
   if (config.jinaApiKey) {
     const jinaProvider = new JinaProvider(config.jinaApiKey);
-    deepEnrichmentService = new DeepEnrichmentService(config.anthropicApiKey, jinaProvider, firecrawlProvider);
+    deepEnrichmentService = new DeepEnrichmentService(llm.deepEnrichment, jinaProvider, firecrawlProvider, creditManager);
     deepEnrichmentService.setPromptConfig(promptConfigService);
     logger.info('Deep enrichment service initialized (Jina primary, Firecrawl fallback)');
   }
 
   if (exaProvider || tavilyProvider) {
     marketSignalSearcher = new MarketSignalSearcher(
-      config.anthropicApiKey, marketSignalProcessor,
+      llm.marketSignalSearcher, marketSignalProcessor,
       { exa: exaProvider, tavily: tavilyProvider },
     );
     marketSignalSearcher.setPromptConfig(promptConfigService);
@@ -195,6 +219,7 @@ async function main() {
     personaSignalDetector,
     deepEnrichmentService,
     marketSignalSearcher,
+    engagementBriefGenerator,
   };
 
   // 5. Start scheduler with handlers

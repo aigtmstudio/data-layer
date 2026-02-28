@@ -20,7 +20,7 @@ export function Header() {
   const { data: balance } = useCreditBalance(selectedClientId);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b bg-card px-6">
+    <header className="flex h-14 items-center justify-between border-b bg-card px-4 md:px-6">
       <div className="flex items-center gap-4">
         {clientsError ? (
           <Badge variant="outline" className="text-muted-foreground">
@@ -31,7 +31,7 @@ export function Header() {
             value={selectedClientId ?? ''}
             onValueChange={(val) => setSelectedClientId(val || null)}
           >
-            <SelectTrigger className="w-[220px]">
+            <SelectTrigger className="w-[180px] md:w-[220px]">
               <SelectValue placeholder="Select a client" />
             </SelectTrigger>
             <SelectContent>

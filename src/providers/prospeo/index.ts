@@ -101,7 +101,7 @@ export class ProspeoProvider extends BaseProvider implements DataProvider {
           confidence: raw.response.score,
           verifiedAt: new Date().toISOString(),
         },
-        creditsConsumed: 0.05,
+        creditsConsumed: 0.5,
         fieldsPopulated: ['emailVerificationStatus'],
         qualityScore: raw.response.result === 'valid' ? 1 : 0.5,
       };
@@ -197,7 +197,7 @@ export class ProspeoProvider extends BaseProvider implements DataProvider {
         data: contacts,
         totalResults: total,
         hasMore: currentPage < totalPages,
-        creditsConsumed: contacts.length * 0.1,
+        creditsConsumed: 1,
         fieldsPopulated: ['name', 'title', 'company', 'linkedin'],
         qualityScore: 0.7,
       };

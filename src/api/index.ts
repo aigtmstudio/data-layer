@@ -17,6 +17,7 @@ import { hypothesisRoutes } from './routes/hypotheses.js';
 import { marketSignalRoutes } from './routes/market-signals.js';
 import { personaV2Routes } from './routes/personas-v2.js';
 import { settingsRoutes } from './routes/settings.js';
+import { llmUsageRoutes } from './routes/llm-usage.js';
 import type { ServiceContainer } from '../index.js';
 
 export async function buildApp(apiKey: string, container: ServiceContainer) {
@@ -45,6 +46,7 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   await app.register(icpDirectRoutes, { prefix: '/api/icps', container });
   await app.register(personaV2Routes, { prefix: '/api/personas', container });
   await app.register(settingsRoutes, { prefix: '/api/settings', container });
+  await app.register(llmUsageRoutes, { prefix: '/api/llm-usage' });
 
   // Health check
   app.get('/health', async () => ({

@@ -38,14 +38,18 @@ export class JinaProvider extends BaseProvider implements Partial<DataProvider> 
    * Read a single URL and return its markdown content.
    * Returns null on 404 or other failures (non-throwing).
    */
-  async readUrl(url: string): Promise<{ content: string; title?: string } | null> {
+  async readUrl(url: string): Promise<{ content: string; title?: string; tokensUsed: number } | null> {
     try {
       const response = await this.request<JinaReadResponse>('post', '', {
         body: { url },
         timeout: 30_000,
       });
       if (!response.data?.content) return null;
-      return { content: response.data.content, title: response.data.title };
+      return {
+        content: response.data.content,
+        title: response.data.title,
+        tokensUsed: response.data.usage?.tokens ?? 0,
+      };
     } catch {
       // 404s, timeouts, etc. — non-fatal for page discovery
       return null;
@@ -55,12 +59,13 @@ export class JinaProvider extends BaseProvider implements Partial<DataProvider> 
   /**
    * Scrape key pages of a company website and return combined markdown.
    * Tries homepage + up to 3-4 informational pages.
-   * Returns combined content capped at ~15k chars.
+   * Returns combined content capped at ~15k chars, plus total tokens consumed.
    */
-  async scrapeCompanyWebsite(domain: string): Promise<string> {
+  async scrapeCompanyWebsite(domain: string): Promise<{ content: string; tokensUsed: number; pagesScraped: number }> {
     const log = this.log.child({ domain });
     const sections: string[] = [];
     let totalChars = 0;
+    let totalTokens = 0;
 
     // Always start with homepage
     const homepage = await this.readUrl(`https://${domain}`);
@@ -68,7 +73,8 @@ export class JinaProvider extends BaseProvider implements Partial<DataProvider> 
       const chunk = homepage.content.slice(0, 5000);
       sections.push(`## Homepage\n${chunk}`);
       totalChars += chunk.length;
-      log.debug({ chars: chunk.length }, 'Scraped homepage');
+      totalTokens += homepage.tokensUsed;
+      log.debug({ chars: chunk.length, tokens: homepage.tokensUsed }, 'Scraped homepage');
     }
 
     // Try candidate pages
@@ -83,12 +89,14 @@ export class JinaProvider extends BaseProvider implements Partial<DataProvider> 
         const chunk = result.content.slice(0, Math.min(4000, remaining));
         sections.push(`## ${path}\n${chunk}`);
         totalChars += chunk.length;
+        totalTokens += result.tokensUsed;
         pagesScraped++;
-        log.debug({ path, chars: chunk.length }, 'Scraped page');
+        log.debug({ path, chars: chunk.length, tokens: result.tokensUsed }, 'Scraped page');
       }
     }
 
-    log.info({ pages: pagesScraped + (homepage?.content ? 1 : 0), totalChars }, 'Website scrape complete');
-    return sections.join('\n\n');
+    const totalPages = pagesScraped + (homepage?.content ? 1 : 0);
+    log.info({ pages: totalPages, totalChars, totalTokens }, 'Website scrape complete');
+    return { content: sections.join('\n\n'), tokensUsed: totalTokens, pagesScraped: totalPages };
   }
 }

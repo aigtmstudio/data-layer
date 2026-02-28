@@ -199,7 +199,8 @@ export type JobType =
   | 'contact_list_build'
   | 'persona_signal_detection'
   | 'deep_enrichment'
-  | 'market_signal_search';
+  | 'market_signal_search'
+  | 'brief_generation';
 
 export interface Job {
   id: string;
@@ -216,6 +217,8 @@ export interface Job {
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  llmCostUsd?: string;
+  llmCalls?: number;
 }
 
 export interface JobError {
@@ -297,6 +300,56 @@ export interface ListMember {
   contactName?: string | null;
   contactTitle?: string | null;
   contactEmail?: string | null;
+  engagementBrief?: EngagementBrief | null;
+  briefGeneratedAt?: string | null;
+}
+
+export interface EngagementBrief {
+  version: 1;
+  generatedAt: string;
+  headline: string;
+  whyThisPerson: {
+    summary: string;
+    fitFactors: { factor: string; detail: string; strength: number }[];
+  };
+  whyNow: {
+    summary: string;
+    triggers: {
+      trigger: string;
+      detail: string;
+      strength: number;
+      source: 'contact_signal' | 'company_signal' | 'market_signal';
+      recency: string;
+    }[];
+  };
+  companyContext: {
+    summary: string;
+    scale: string;
+    relevantFactors: string[];
+  };
+  conversationStarters: {
+    angle: string;
+    opener: string;
+    reasoning: string;
+  }[];
+  keyDataPoints: {
+    contact: {
+      name: string; title: string; seniority: string | null;
+      email: string | null; phone: string | null;
+      linkedin: string | null; location: string | null;
+    };
+    company: {
+      name: string; domain: string | null; industry: string | null;
+      employeeRange: string | null; revenueRange: string | null;
+      fundingStage: string | null;
+    };
+    employmentArc: { title: string; company: string; period: string; isCurrent: boolean }[];
+  };
+  scores: {
+    personaFit: number; signalScore: number;
+    companySignalScore: number; icpFitScore: number;
+  };
+  inputHash: string;
 }
 
 export interface FunnelStats {
@@ -422,6 +475,69 @@ export interface PromptConfig {
   currentContent: string;
   isCustomised: boolean;
   updatedAt: string | null;
+}
+
+// LLM Usage tracking
+export interface LlmUsageSummary {
+  totals: {
+    totalCalls: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalCostUsd: string;
+  };
+  byService: {
+    service: string;
+    model: string;
+    calls: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: string;
+  }[];
+  periodDays: number;
+}
+
+export interface LlmUsageRecord {
+  id: string;
+  clientId: string | null;
+  jobId: string | null;
+  service: string;
+  operation: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  inputCostUsd: string;
+  outputCostUsd: string;
+  totalCostUsd: string;
+  createdAt: string;
+}
+
+// Data provider cost tracking
+export interface ProviderCostSummary {
+  totals: {
+    totalCalls: number;
+    totalBaseCost: string;
+    totalMargin: string;
+    totalCreditsUsed: string;
+  };
+  byProvider: {
+    provider: string | null;
+    operation: string | null;
+    calls: number;
+    baseCost: string;
+    margin: string;
+    creditsUsed: string;
+  }[];
+  recentUsage: {
+    id: string;
+    dataSource: string | null;
+    operationType: string | null;
+    baseCost: string | null;
+    marginAmount: string | null;
+    amount: string;
+    description: string;
+    createdAt: string;
+  }[];
+  periodDays: number;
 }
 
 // API response wrapper

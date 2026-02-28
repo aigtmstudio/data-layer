@@ -21,7 +21,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { formatDate, formatRelativeTime, getJobStatusColor } from '@/lib/utils';
+import { formatDate, formatRelativeTime, formatCurrency, getJobStatusColor } from '@/lib/utils';
 import { Ban } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
@@ -107,6 +107,17 @@ export default function JobsPage() {
         if (secs < 60) return `${secs}s`;
         const mins = Math.floor(secs / 60);
         return `${mins}m ${secs % 60}s`;
+      },
+    },
+    {
+      id: 'llmCost',
+      header: 'LLM Cost',
+      cell: ({ row }) => {
+        const cost = row.original.llmCostUsd;
+        if (!cost || cost === '0') return <span className="text-muted-foreground">-</span>;
+        return (
+          <span className="font-medium text-sm">{formatCurrency(cost, 4)}</span>
+        );
       },
     },
     {
@@ -210,6 +221,19 @@ export default function JobsPage() {
                   {selectedJob.failedItems ?? 0} failed
                 </p>
               </div>
+
+              {selectedJob.llmCostUsd && selectedJob.llmCostUsd !== '0' && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-xs text-muted-foreground">LLM Cost</p>
+                    <p className="text-sm font-medium">{formatCurrency(selectedJob.llmCostUsd, 4)}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">API Calls</p>
+                    <p className="text-sm">{selectedJob.llmCalls ?? 0}</p>
+                  </div>
+                </div>
+              )}
 
               {selectedJob.input && Object.keys(selectedJob.input).length > 0 && (
                 <div>

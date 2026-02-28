@@ -61,6 +61,7 @@ export interface ApolloPerson {
 
 export interface ApolloOrgEnrichResponse {
   organization: ApolloOrganization;
+  credits_consumed?: number;
 }
 
 export interface ApolloPeopleSearchResponse {
@@ -85,6 +86,7 @@ export interface ApolloCompanySearchResponse {
 
 export interface ApolloPersonEnrichResponse {
   person: ApolloPerson;
+  credits_consumed?: number;
 }
 
 export interface ApolloApiSearchResponse {

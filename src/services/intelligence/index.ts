@@ -21,3 +21,5 @@ export { DeepEnrichmentService } from './deep-enrichment.js';
 export type { EnrichBatchResult } from './deep-enrichment.js';
 export { MarketSignalSearcher } from './market-signal-searcher.js';
 export type { EvidenceSearchResult } from './market-signal-searcher.js';
+export { EngagementBriefGenerator } from './engagement-brief-generator.js';
+export type { EngagementBrief, BriefGenerationResult } from './engagement-brief-generator.js';

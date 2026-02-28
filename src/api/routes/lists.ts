@@ -4,6 +4,7 @@ import { getDb, schema } from '../../db/index.js';
 import { eq, and, isNull, desc, sql, inArray, gte } from 'drizzle-orm';
 import type { ServiceContainer } from '../../index.js';
 import { logger } from '../../lib/logger.js';
+import { withLlmContext } from '../../lib/llm-tracker.js';
 
 const createListBody = z.object({
   clientId: z.string().uuid(),
@@ -67,15 +68,16 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       .returning();
 
     // Kick off build in background (fire-and-forget)
-    opts.container.listBuilder
-      .buildListWithDiscovery({
-        clientId: list.clientId,
-        listId: list.id,
-        icpId: list.icpId,
-        personaId: list.personaId ?? undefined,
-        jobId: job.id,
-      })
-      .catch(async (error) => {
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, () =>
+      opts.container.listBuilder
+        .buildListWithDiscovery({
+          clientId: list.clientId,
+          listId: list.id,
+          icpId: list.icpId!,
+          personaId: list.personaId ?? undefined,
+          jobId: job.id,
+        })
+    ).catch(async (error) => {
         logger.error({ error, listId: list.id, jobId: job.id }, 'List build with discovery failed');
         await db
           .update(schema.jobs)
@@ -101,7 +103,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       .select()
       .from(schema.jobs)
       .where(and(
-        inArray(schema.jobs.type, ['list_build', 'contact_list_build', 'persona_signal_detection', 'company_signals']),
+        inArray(schema.jobs.type, ['list_build', 'contact_list_build', 'persona_signal_detection', 'company_signals', 'brief_generation']),
         sql`(${schema.jobs.input}->>'listId' = ${listId} OR ${schema.jobs.input}->>'contactListId' = ${listId})`,
       ))
       .orderBy(desc(schema.jobs.createdAt))
@@ -182,6 +184,8 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           contactName: schema.contacts.fullName,
           contactTitle: schema.contacts.title,
           contactEmail: schema.contacts.workEmail,
+          engagementBrief: schema.listMembers.engagementBrief,
+          briefGeneratedAt: schema.listMembers.briefGeneratedAt,
         })
         .from(schema.listMembers)
         .leftJoin(schema.companies, eq(schema.listMembers.companyId, schema.companies.id))
@@ -387,14 +391,15 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
     // Fire-and-forget
     reply.status(202).send({ data: { jobId: job.id, contactListId: contactList.id } });
 
-    opts.container.listBuilder
-      .buildContactList({
-        clientId: sourceList.clientId,
-        sourceListId: sourceList.id,
-        contactListId: contactList.id,
-        personaId: body.personaId,
-      })
-      .then(async (result) => {
+    withLlmContext({ clientId: sourceList.clientId, jobId: job.id }, () =>
+      opts.container.listBuilder
+        .buildContactList({
+          clientId: sourceList.clientId,
+          sourceListId: sourceList.id,
+          contactListId: contactList.id,
+          personaId: body.personaId,
+        })
+    ).then(async (result) => {
         await db
           .update(schema.jobs)
           .set({
@@ -448,9 +453,10 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
     // Fire-and-forget
     reply.status(202).send({ data: { jobId: job.id } });
 
-    opts.container.listBuilder
-      .runPersonaSignals(list.id)
-      .then(async (result) => {
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, () =>
+      opts.container.listBuilder
+        .runPersonaSignals(list.id)
+    ).then(async (result) => {
         await db
           .update(schema.jobs)
           .set({
@@ -464,6 +470,64 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       })
       .catch(async (error) => {
         logger.error({ error, listId: list.id, jobId: job.id }, 'Persona signal detection failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            updatedAt: new Date(),
+            errors: [{ item: list.id, error: String(error), timestamp: new Date().toISOString() }],
+          })
+          .where(eq(schema.jobs.id, job.id));
+      });
+  });
+
+  // POST /api/lists/:id/generate-briefs — generate engagement briefs for qualifying contacts
+  app.post<{ Params: { id: string } }>('/:id/generate-briefs', async (request, reply) => {
+    const body = z.object({
+      forceRegenerate: z.boolean().optional(),
+    }).parse(request.body ?? {});
+
+    const db = getDb();
+    const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
+    if (!list) {
+      return reply.status(404).send({ error: 'List not found' });
+    }
+    if (list.type !== 'contact') {
+      return reply.status(400).send({ error: 'Briefs can only be generated for contact lists' });
+    }
+
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
+        clientId: list.clientId,
+        type: 'brief_generation',
+        status: 'running',
+        input: { listId: list.id, forceRegenerate: body.forceRegenerate ?? false },
+      })
+      .returning();
+
+    reply.status(202).send({ data: { jobId: job.id } });
+
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, () =>
+      opts.container.listBuilder
+        .generateBriefs(list.id, {
+          forceRegenerate: body.forceRegenerate,
+        })
+    ).then(async (result) => {
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'completed',
+            processedItems: result.generated,
+            output: result as unknown as Record<string, unknown>,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
+      })
+      .catch(async (error) => {
+        logger.error({ error, listId: list.id, jobId: job.id }, 'Brief generation failed');
         await db
           .update(schema.jobs)
           .set({
@@ -514,9 +578,10 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
 
     reply.status(202).send({ data: { jobId: job.id } });
 
-    opts.container.deepEnrichmentService
-      .enrichBatch(list.clientId, companyIds, { jobId: job.id })
-      .then(async (result) => {
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, () =>
+      opts.container.deepEnrichmentService!
+        .enrichBatch(list.clientId, companyIds, { jobId: job.id })
+    ).then(async (result) => {
         await db
           .update(schema.jobs)
           .set({
@@ -578,7 +643,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
     reply.status(202).send({ data: { jobId: job.id } });
 
     // Run the full pipeline in background
-    (async () => {
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, async () => {
       const log = logger.child({ listId: list.id, jobId: job.id });
       const output: Record<string, unknown> = {};
 
@@ -635,7 +700,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           })
           .where(eq(schema.jobs.id, job.id));
       }
-    })();
+    });
   });
 
   // POST /api/lists/:id/signals/company — trigger company-level signal detection
@@ -658,9 +723,10 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       .returning();
 
     // Run company signals in background
-    opts.container.listBuilder
-      .runCompanySignals(list.id)
-      .then(async (result) => {
+    withLlmContext({ clientId: list.clientId, jobId: job.id }, () =>
+      opts.container.listBuilder
+        .runCompanySignals(list.id)
+    ).then(async (result) => {
         await db
           .update(schema.jobs)
           .set({

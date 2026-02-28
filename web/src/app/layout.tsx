@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
-import { Sidebar } from '@/components/layout/sidebar';
+import { DesktopSidebar, MobileNav } from '@/components/layout/sidebar';
 import { Header } from '@/components/layout/header';
+import { Target } from 'lucide-react';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -29,11 +30,21 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Providers>
-          <div className="flex h-screen overflow-hidden">
-            <Sidebar />
-            <div className="flex flex-1 flex-col overflow-hidden">
+          <div className="min-h-screen bg-background">
+            {/* Mobile header — visible only below md */}
+            <div className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-card px-4 md:hidden">
+              <MobileNav />
+              <Target className="h-5 w-5 text-primary" />
+              <span className="font-semibold">Data Layer</span>
+            </div>
+
+            {/* Desktop sidebar — fixed position, hidden on mobile */}
+            <DesktopSidebar />
+
+            {/* Main content — offset by sidebar width on desktop */}
+            <div className="md:pl-60">
               <Header />
-              <main className="flex-1 overflow-y-auto p-6">{children}</main>
+              <main className="p-4 md:p-6">{children}</main>
             </div>
           </div>
         </Providers>

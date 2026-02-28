@@ -4,7 +4,7 @@ import type { ProcessedSource, CrmInsights } from './source-processor.js';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
-function extractJson(text: string): unknown {
+function extractJson(text: string): Record<string, unknown> {
   // Strip markdown code fences if present
   const stripped = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
   return JSON.parse(stripped);
@@ -240,8 +240,8 @@ export class IcpParser {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
 
-  constructor(apiKey: string) {
-    this.anthropic = new Anthropic({ apiKey });
+  constructor(anthropicClient: Anthropic) {
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {
@@ -316,7 +316,7 @@ export class IcpParser {
     const parsed = extractJson(content);
 
     // Clean and validate output
-    const filters = cleanFilters(parsed.filters ?? parsed);
+    const filters = cleanFilters((parsed.filters ?? parsed) as Record<string, unknown>);
 
     // Merge classic selectors as hard constraints (override LLM output)
     const classicSource = input.sources.find(s => s.sourceType === 'classic');
@@ -329,7 +329,7 @@ export class IcpParser {
       mergeClassicSelectors(filters, input.existingFilters);
     }
 
-    const providerHints = cleanProviderHints(parsed.providerHints ?? {});
+    const providerHints = cleanProviderHints((parsed.providerHints ?? {}) as Record<string, unknown>);
     const suggestedPersona = input.generatePersona !== false
       ? cleanPersona(parsed.suggestedPersona)
       : undefined;
@@ -338,7 +338,7 @@ export class IcpParser {
       ? Math.max(0, Math.min(1, parsed.confidence))
       : calculateConfidence(filters, input.sources.length);
 
-    const sourceContributions = parsed.sourceContributions ?? {};
+    const sourceContributions = (parsed.sourceContributions ?? {}) as Record<string, string[]>;
 
     logger.info(
       { confidence, sourceTypes, hasPersona: !!suggestedPersona },

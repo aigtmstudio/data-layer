@@ -69,9 +69,9 @@ export class ClientProfileService {
 
   constructor(
     private orchestrator: SourceOrchestrator,
-    anthropicApiKey: string,
+    anthropicClient: Anthropic,
   ) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {

@@ -5,6 +5,7 @@ import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 import type { JinaProvider } from '../../providers/jina/index.js';
 import type { FirecrawlProvider } from '../../providers/firecrawl/index.js';
+import type { CreditManager } from '../credit-manager/index.js';
 
 export const PESTLE_PROFILE_PROMPT = `You are a strategic market analyst. Given website content from a company, generate a PESTLE analysis that captures how external macro forces affect this specific business.
 
@@ -56,17 +57,20 @@ export class DeepEnrichmentService {
   private anthropic: Anthropic;
   private jinaProvider: JinaProvider;
   private firecrawlProvider?: FirecrawlProvider;
+  private creditManager?: CreditManager;
   private promptConfig?: PromptConfigService;
   private log = logger.child({ service: 'deep-enrichment' });
 
   constructor(
-    anthropicApiKey: string,
+    anthropicClient: Anthropic,
     jinaProvider: JinaProvider,
     firecrawlProvider?: FirecrawlProvider,
+    creditManager?: CreditManager,
   ) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.anthropic = anthropicClient;
     this.jinaProvider = jinaProvider;
     this.firecrawlProvider = firecrawlProvider;
+    this.creditManager = creditManager;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {
@@ -115,7 +119,7 @@ export class DeepEnrichmentService {
     for (let i = 0; i < companies.length; i += concurrency) {
       const batch = companies.slice(i, i + concurrency);
       const results = await Promise.allSettled(
-        batch.map(c => this.enrichSingleCompany(c as CompanyForEnrichment)),
+        batch.map(c => this.enrichSingleCompany(c as CompanyForEnrichment, clientId)),
       );
 
       for (const r of results) {
@@ -144,11 +148,29 @@ export class DeepEnrichmentService {
    * Enrich a single company: scrape website → generate PESTLE profile.
    * Returns the profile text, or null if scraping failed.
    */
-  async enrichSingleCompany(company: CompanyForEnrichment): Promise<string | null> {
+  async enrichSingleCompany(company: CompanyForEnrichment, clientId?: string): Promise<string | null> {
     const log = this.log.child({ companyId: company.id, domain: company.domain });
 
     // Step 1: Scrape website content
-    let websiteContent = await this.jinaProvider.scrapeCompanyWebsite(company.domain);
+    const scrapeResult = await this.jinaProvider.scrapeCompanyWebsite(company.domain);
+    let websiteContent = scrapeResult.content;
+
+    // Charge Jina credits if we have a credit manager and client context
+    // Jina pricing: ~$20/million tokens (token-metered)
+    if (this.creditManager && clientId && scrapeResult.tokensUsed > 0) {
+      try {
+        const jinaCostUsd = scrapeResult.tokensUsed * 0.00002; // $20/million tokens
+        await this.creditManager.charge(clientId, {
+          baseCost: jinaCostUsd,
+          source: 'jina',
+          operation: 'website_scrape',
+          description: `Website scrape: ${company.domain} (${scrapeResult.pagesScraped} pages, ${scrapeResult.tokensUsed} tokens)`,
+          metadata: { tokensUsed: scrapeResult.tokensUsed, pagesScraped: scrapeResult.pagesScraped },
+        });
+      } catch (error) {
+        log.warn({ error }, 'Failed to charge Jina credits');
+      }
+    }
 
     // Fallback to Firecrawl if Jina returned very little content
     if (websiteContent.length < 500 && this.firecrawlProvider) {

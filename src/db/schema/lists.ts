@@ -57,6 +57,9 @@ export const listMembers = pgTable('list_members', {
   personaScore: numeric('persona_score', { precision: 3, scale: 2 }),
   addedReason: text('added_reason'),
 
+  engagementBrief: jsonb('engagement_brief'),
+  briefGeneratedAt: timestamp('brief_generated_at', { withTimezone: true }),
+
   addedAt: timestamp('added_at', { withTimezone: true }).notNull().defaultNow(),
   removedAt: timestamp('removed_at', { withTimezone: true }),
 }, (table) => [

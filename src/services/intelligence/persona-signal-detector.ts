@@ -55,8 +55,8 @@ export class PersonaSignalDetector {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
 
-  constructor(anthropicApiKey: string) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+  constructor(anthropicClient: Anthropic) {
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {

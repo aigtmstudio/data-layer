@@ -54,7 +54,7 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
         data: companies,
         totalResults: companies.length,
         hasMore: false,
-        creditsConsumed: 1,
+        creditsConsumed: raw.usage?.credits ?? 1,
         fieldsPopulated: ['name', 'domain', 'description'],
         qualityScore: 0.35,
       };
@@ -90,11 +90,12 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
       }
 
       const searchRaw = await this.request<TavilySearchResponse>('post', '/search', { body: searchBody });
+      let totalCredits = searchRaw.usage?.credits ?? 1;
 
       if (!searchRaw.results.length) {
         return {
           success: false, data: null, error: 'No results found',
-          creditsConsumed: 2, fieldsPopulated: [], qualityScore: 0,
+          creditsConsumed: totalCredits, fieldsPopulated: [], qualityScore: 0,
         };
       }
 
@@ -109,6 +110,7 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
           };
 
           const extractRaw = await this.request<TavilyExtractResponse>('post', '/extract', { body: extractBody });
+          totalCredits += extractRaw.usage?.credits ?? 1;
           if (extractRaw.results.length) {
             extractDescription = extractRaw.results[0].raw_content?.slice(0, 2000) ?? '';
           }
@@ -138,7 +140,7 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
       return {
         success: true,
         data: unified,
-        creditsConsumed: 3,
+        creditsConsumed: totalCredits,
         fieldsPopulated,
         qualityScore: Math.min(fieldsPopulated.length / 15, 1),
       };

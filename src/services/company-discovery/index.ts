@@ -165,9 +165,9 @@ export class CompanyDiscoveryService {
   constructor(
     private orchestrator: SourceOrchestrator,
     private enrichment: EnrichmentPipeline,
-    anthropicApiKey: string,
+    anthropicClient: Anthropic,
   ) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {

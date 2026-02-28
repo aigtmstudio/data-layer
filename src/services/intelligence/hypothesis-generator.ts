@@ -268,10 +268,10 @@ export class HypothesisGenerator {
   private promptConfig?: PromptConfigService;
 
   constructor(
-    anthropicApiKey: string,
+    anthropicClient: Anthropic,
     private clientProfileService: ClientProfileService,
   ) {
-    this.anthropic = new Anthropic({ apiKey: anthropicApiKey });
+    this.anthropic = anthropicClient;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {

@@ -1,5 +1,5 @@
 import { apiClient } from '../api-client';
-import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage, CompanySignal, ContactSignal } from '../types';
+import type { List, ListMember, ListType, Job, FunnelStats, ApiResponse, PipelineStage, CompanySignal, ContactSignal, EngagementBrief } from '../types';
 
 export async function getLists(clientId?: string): Promise<List[]> {
   const query = clientId ? `?clientId=${clientId}` : '';
@@ -67,6 +67,8 @@ interface RawListMember {
   contactName: string | null;
   contactTitle: string | null;
   contactEmail: string | null;
+  engagementBrief: EngagementBrief | null;
+  briefGeneratedAt: string | null;
 }
 
 export async function getListMembers(
@@ -111,6 +113,8 @@ export async function getListMembers(
           workEmail: row.contactEmail ?? null,
         } as ListMember['contact']
       : undefined,
+    engagementBrief: row.engagementBrief,
+    briefGeneratedAt: row.briefGeneratedAt,
   }));
 }
 
@@ -157,6 +161,14 @@ export async function getMemberSignals(id: string, clientId: string): Promise<Co
 
 export async function getContactSignals(id: string, clientId: string): Promise<ContactSignal[]> {
   const res = await apiClient.get<ApiResponse<ContactSignal[]>>(`/api/lists/${id}/contact-signals?clientId=${clientId}`);
+  return res.data;
+}
+
+export async function generateBriefs(
+  id: string,
+  data?: { forceRegenerate?: boolean },
+): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/generate-briefs`, data ?? {});
   return res.data;
 }
 

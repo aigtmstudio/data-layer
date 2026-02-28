@@ -53,7 +53,7 @@ export function DataTable<TData, TValue>({
   });
 
   return (
-    <div>
+    <div className="min-w-0 overflow-x-auto">
       <div className="rounded-md border">
         <Table>
           <TableHeader>
@@ -115,7 +115,7 @@ export function DataTable<TData, TValue>({
                     </TableRow>
                     {isExpanded && renderSubRow && (
                       <TableRow className="bg-muted/30 hover:bg-muted/30">
-                        <TableCell colSpan={columns.length} className="p-0">
+                        <TableCell colSpan={columns.length} className="p-0 whitespace-normal">
                           {renderSubRow(row.original)}
                         </TableCell>
                       </TableRow>

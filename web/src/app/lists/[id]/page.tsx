@@ -4,7 +4,7 @@ import { use, useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useContactSignals, useDeleteList, listKeys } from '@/lib/hooks/use-lists';
+import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useContactSignals, useDeleteList, useGenerateBriefs, listKeys } from '@/lib/hooks/use-lists';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { useAppStore } from '@/lib/store';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
@@ -36,11 +36,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
-import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2, Loader2, FileText, MessageSquare, Briefcase, TrendingUp, User, Building2, Mail, Phone, Linkedin, MapPin } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
-import type { ListMember, PipelineStage, CompanySignal, ContactSignal, SignalStrengthTier } from '@/lib/types';
+import type { ListMember, PipelineStage, CompanySignal, ContactSignal, SignalStrengthTier, EngagementBrief } from '@/lib/types';
 
 // --- Helper components ---
 
@@ -353,6 +353,218 @@ function PersonaSignalDetailPanel({ signals }: { signals: ContactSignal[] }) {
   );
 }
 
+// --- Engagement Brief panel ---
+
+function EngagementBriefPanel({ brief, signals, websiteProfile }: { brief: EngagementBrief; signals: ContactSignal[]; websiteProfile?: string | null }) {
+  const kd = brief.keyDataPoints;
+  const [showProfile, setShowProfile] = useState(false);
+
+  return (
+    <div className="px-6 py-5 space-y-5">
+      {/* Headline */}
+      <div className="border-l-4 border-primary pl-4 min-w-0">
+        <p className="text-base font-semibold leading-snug break-words">{brief.headline}</p>
+        <p className="text-[11px] text-muted-foreground mt-1">
+          Generated {new Date(brief.generatedAt).toLocaleDateString()}
+        </p>
+      </div>
+
+      {/* Key data cards — horizontal strip */}
+      <div className="flex flex-wrap gap-3">
+        {/* Contact */}
+        <div className="rounded-lg border bg-background p-3 min-w-[140px] flex-1 space-y-1.5">
+          <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Contact</h5>
+          <p className="text-sm font-medium break-words">{kd.contact.name}</p>
+          <p className="text-xs text-muted-foreground break-words">{kd.contact.title}</p>
+          {kd.contact.email && (
+            <div className="flex items-center gap-1.5 text-xs min-w-0">
+              <Mail className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <a href={`mailto:${kd.contact.email}`} className="text-primary hover:underline truncate">{kd.contact.email}</a>
+            </div>
+          )}
+          {kd.contact.linkedin && (
+            <div className="flex items-center gap-1.5 text-xs min-w-0">
+              <Linkedin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <a href={kd.contact.linkedin} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">LinkedIn</a>
+            </div>
+          )}
+          {kd.contact.phone && (
+            <div className="flex items-center gap-1.5 text-xs min-w-0">
+              <Phone className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <span>{kd.contact.phone}</span>
+            </div>
+          )}
+          {kd.contact.location && (
+            <div className="flex items-center gap-1.5 text-xs min-w-0">
+              <MapPin className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <span className="break-words">{kd.contact.location}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Company */}
+        <div className="rounded-lg border bg-background p-3 min-w-[140px] flex-1 space-y-1.5">
+          <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Company</h5>
+          <p className="text-sm font-medium break-words">{kd.company.name}</p>
+          {kd.company.industry && <p className="text-xs text-muted-foreground">{kd.company.industry}</p>}
+          {kd.company.employeeRange && <p className="text-xs text-muted-foreground">{kd.company.employeeRange} employees</p>}
+          {kd.company.fundingStage && <p className="text-xs text-muted-foreground">Funding: {kd.company.fundingStage}</p>}
+          {kd.company.domain && (
+            <a href={`https://${kd.company.domain}`} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1 min-w-0">
+              <ExternalLink className="h-3 w-3 flex-shrink-0" /> <span className="truncate">{kd.company.domain}</span>
+            </a>
+          )}
+        </div>
+
+        {/* Career History */}
+        {kd.employmentArc.length > 0 && (
+          <div className="rounded-lg border bg-background p-3 min-w-[140px] flex-1 space-y-1.5">
+            <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Career</h5>
+            {kd.employmentArc.slice(0, 3).map((role, i) => (
+              <div key={i} className={`text-xs ${role.isCurrent ? 'font-medium' : 'text-muted-foreground'}`}>
+                <p className="break-words">{role.title}</p>
+                <p className="text-[10px] text-muted-foreground">{role.company} &middot; {role.period}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Scores */}
+        <div className="rounded-lg border bg-background p-3 min-w-[120px] flex-1">
+          <h5 className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Scores</h5>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {[
+              { label: 'Persona', value: brief.scores.personaFit },
+              { label: 'Signals', value: brief.scores.signalScore },
+              { label: 'ICP Fit', value: brief.scores.icpFitScore },
+              { label: 'Company', value: brief.scores.companySignalScore },
+            ].map(({ label, value }) => (
+              <div key={label} className="flex items-baseline justify-between gap-1">
+                <span className="text-[10px] text-muted-foreground">{label}</span>
+                <span className="text-sm font-bold tabular-nums">{(value * 100).toFixed(0)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Why This Person */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <User className="h-4 w-4 text-blue-600 flex-shrink-0" />
+          <h4 className="text-sm font-semibold">Why This Person</h4>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed break-words">{brief.whyThisPerson.summary}</p>
+        {brief.whyThisPerson.fitFactors.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {brief.whyThisPerson.fitFactors.map((f, i) => (
+              <span key={i} className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-2 py-0.5 text-xs font-medium break-words">
+                {f.factor}: {f.detail}
+                <span className="ml-1 text-[10px] opacity-70">{(f.strength * 100).toFixed(0)}%</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* Why Now */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-emerald-600 flex-shrink-0" />
+          <h4 className="text-sm font-semibold">Why Now</h4>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed break-words">{brief.whyNow.summary}</p>
+        {brief.whyNow.triggers.length > 0 && (
+          <div className="space-y-2">
+            {brief.whyNow.triggers.map((t, i) => {
+              const sourceColors = {
+                contact_signal: 'bg-purple-50 border-purple-200',
+                company_signal: 'bg-blue-50 border-blue-200',
+                market_signal: 'bg-amber-50 border-amber-200',
+              };
+              return (
+                <div key={i} className={`rounded-lg border p-3 ${sourceColors[t.source]}`}>
+                  <div className="flex items-start justify-between gap-2 min-w-0">
+                    <span className="text-xs font-medium break-words min-w-0">{t.trigger}</span>
+                    <span className="text-[10px] text-muted-foreground flex-shrink-0">{t.recency}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 break-words">{t.detail}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Company Context */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <Building2 className="h-4 w-4 text-slate-600 flex-shrink-0" />
+          <h4 className="text-sm font-semibold">Company Context</h4>
+        </div>
+        <p className="text-sm text-muted-foreground leading-relaxed break-words">{brief.companyContext.summary}</p>
+        <p className="text-xs text-muted-foreground break-words">{brief.companyContext.scale}</p>
+        {brief.companyContext.relevantFactors.length > 0 && (
+          <ul className="list-disc list-inside text-xs text-muted-foreground space-y-0.5">
+            {brief.companyContext.relevantFactors.map((f, i) => (
+              <li key={i} className="break-words">{f}</li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Conversation Starters */}
+      <section className="space-y-2">
+        <div className="flex items-center gap-2">
+          <MessageSquare className="h-4 w-4 text-violet-600 flex-shrink-0" />
+          <h4 className="text-sm font-semibold">Conversation Starters</h4>
+        </div>
+        <div className="space-y-2">
+          {brief.conversationStarters.map((cs, i) => (
+            <div key={i} className="rounded-lg border bg-background p-3 space-y-1">
+              <span className="text-xs font-semibold text-violet-700">{cs.angle}</span>
+              <p className="text-sm leading-relaxed break-words">&ldquo;{cs.opener}&rdquo;</p>
+              <p className="text-[11px] text-muted-foreground break-words">{cs.reasoning}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* PESTLE profile (collapsed) */}
+      {websiteProfile && (
+        <div className="space-y-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); setShowProfile(!showProfile); }}
+            className="flex items-center gap-1 text-xs font-medium text-muted-foreground uppercase tracking-wide hover:text-foreground transition-colors"
+          >
+            <ChevronDown className={`h-3 w-3 transition-transform ${showProfile ? '' : '-rotate-90'}`} />
+            Company PESTLE Profile
+          </button>
+          {showProfile && (
+            <div className="rounded-lg border bg-muted/20 p-4">
+              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-sans leading-relaxed break-words">
+                {websiteProfile}
+              </pre>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Underlying signals (collapsed) */}
+      {signals.length > 0 && (
+        <details className="group">
+          <summary className="text-xs text-muted-foreground cursor-pointer hover:text-foreground">
+            View {signals.length} underlying signal{signals.length !== 1 ? 's' : ''}
+          </summary>
+          <div className="mt-2">
+            <PersonaSignalDetailPanel signals={signals} />
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 // --- Company list column definitions ---
 
 const SOURCE_LABELS: Record<string, { label: string; className: string }> = {
@@ -506,10 +718,18 @@ function getContactColumns(signalsByContact?: Map<string, ContactSignal[]>): Col
         return row.contactName ?? '';
       },
       cell: ({ row }) => {
-        if (row.original.contact) {
-          return `${row.original.contact.firstName ?? ''} ${row.original.contact.lastName ?? ''}`.trim() || row.original.contactName || '-';
-        }
-        return row.original.contactName ?? '-';
+        const name = row.original.contact
+          ? (`${row.original.contact.firstName ?? ''} ${row.original.contact.lastName ?? ''}`.trim() || row.original.contactName || '-')
+          : (row.original.contactName ?? '-');
+        const hasBrief = !!row.original.engagementBrief;
+        return (
+          <div className="flex items-center gap-1.5">
+            {hasBrief && (
+              <span className="h-2 w-2 rounded-full bg-violet-500 flex-shrink-0" title="Engagement brief available" />
+            )}
+            <span>{name}</span>
+          </div>
+        );
       },
     },
     {
@@ -595,7 +815,7 @@ function FunnelBar({
                   <button
                     onClick={() => onSelectStage(stage)}
                     className={`
-                      flex flex-col items-center rounded-lg border px-4 py-2 transition-all min-w-[90px]
+                      flex flex-col items-center rounded-lg border px-3 py-2 transition-all min-w-[70px]
                       ${isSelected ? `${config.color} border-2 shadow-sm` : 'bg-background border-border hover:bg-muted'}
                     `}
                   >
@@ -632,6 +852,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const buildList = useBuildList();
   const buildContacts = useBuildContacts();
   const runPersonaSignals = useRunPersonaSignals();
+  const generateBriefs = useGenerateBriefs();
   const applyMarketSignals = useApplyMarketSignals();
   const { data: memberSignals } = useMemberSignals(id, selectedClientId);
   const { data: contactSignals } = useContactSignals(list?.type === 'contact' ? id : null, selectedClientId);
@@ -690,6 +911,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [contactListName, setContactListName] = useState('');
   const [applyingSignals, setApplyingSignals] = useState(false);
   const [personaSignalRunning, setPersonaSignalRunning] = useState(false);
+  const [briefGenRunning, setBriefGenRunning] = useState(false);
 
   // Poll build/job status and show toast on completion
   useEffect(() => {
@@ -699,8 +921,17 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     if (buildJob.status === 'completed') {
       const output = buildJob.output as Record<string, unknown>;
 
+      // Brief generation job
+      if ('generated' in output && 'skipped' in output) {
+        const { generated, skipped, failed } = output as { generated: number; skipped: number; failed: number };
+        const msg = [`${generated} briefs generated`];
+        if (skipped > 0) msg.push(`${skipped} skipped`);
+        if (failed > 0) msg.push(`${failed} failed`);
+        toast.success(`Brief generation complete: ${msg.join(', ')}`);
+        setBriefGenRunning(false);
+      }
       // Persona signals job
-      if ('signalsDetected' in output && 'processed' in output && !('qualified' in output)) {
+      else if ('signalsDetected' in output && 'processed' in output && !('qualified' in output)) {
         const { processed, signalsDetected } = output as { processed: number; signalsDetected: number };
         toast.success(`Persona signals complete: ${processed} contacts evaluated, ${signalsDetected} signals detected`);
         setPersonaSignalRunning(false);
@@ -735,6 +966,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       toast.error('Job failed. Check job logs for details.');
       setBuildingJobId(null);
       setPersonaSignalRunning(false);
+      setBriefGenRunning(false);
     }
   }, [buildJob?.status, buildingJobId, id, qc]);
 
@@ -786,6 +1018,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const renderContactSubRow = useMemo(() => {
     return (row: ListMember) => {
       const signals = signalsByContact?.get(row.contactId ?? '') ?? [];
+      if (row.engagementBrief) {
+        return <EngagementBriefPanel brief={row.engagementBrief} signals={signals} websiteProfile={row.companyWebsiteProfile} />;
+      }
       return <PersonaSignalDetailPanel signals={signals} />;
     };
   }, [signalsByContact]);
@@ -873,6 +1108,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     }
   };
 
+  const handleGenerateBriefs = async () => {
+    try {
+      const result = await generateBriefs.mutateAsync(id);
+      toast.success('Generating engagement briefs — this may take a moment...');
+      setBriefGenRunning(true);
+      if (result?.jobId) {
+        await qc.invalidateQueries({ queryKey: listKeys.buildStatus(id) });
+        setBuildingJobId(result.jobId);
+      }
+    } catch {
+      toast.error('Failed to start brief generation');
+    }
+  };
+
   const handleApplyMarketSignals = async () => {
     try {
       setApplyingSignals(true);
@@ -931,30 +1180,39 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     setScheduleOpen(true);
   };
 
-  const activeCount = funnel?.stages?.active_segment ?? 0;
-  const qualifiedCount = funnel?.stages?.qualified ?? 0;
+  // Cumulative counts: each stage includes companies at that stage AND all later stages.
+  // This way, moving companies forward doesn't "clear" the previous stage's number.
+  const cumulativeCount = (from: PipelineStage) => {
+    if (!funnel?.stages) return 0;
+    const order: PipelineStage[] = ['tam', 'active_segment', 'qualified', 'ready_to_approach', 'in_sequence', 'converted'];
+    const idx = order.indexOf(from);
+    return order.slice(idx).reduce((sum, s) => sum + (funnel.stages[s] ?? 0), 0);
+  };
+  const tamCount = cumulativeCount('tam');          // = total
+  const activeCount = cumulativeCount('active_segment');
+  const qualifiedCount = cumulativeCount('qualified');
 
   // --- Contact List View ---
   if (isContactList) {
     return (
       <div className="space-y-6">
         {/* Header */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-4">
           <Button variant="ghost" size="sm" asChild>
             <Link href="/lists">
               <ArrowLeft className="mr-1 h-4 w-4" />
               Back
             </Link>
           </Button>
-          <div className="flex-1">
-            <h1 className="text-2xl font-bold">{list.name}</h1>
-            <div className="flex items-center gap-2 mt-1">
-              <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300">
+          <div className="flex-1 min-w-0">
+            <h1 className="text-2xl font-bold truncate">{list.name}</h1>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <Badge variant="outline" className="bg-purple-50 text-purple-700 border-purple-300 flex-shrink-0">
                 <UserCircle className="mr-1 h-3 w-3" />
                 Contact List
               </Badge>
               {list.sourceCompanyListId && (
-                <Link href={`/lists/${list.sourceCompanyListId}`}>
+                <Link href={`/lists/${list.sourceCompanyListId}`} className="flex-shrink-0">
                   <Badge variant="secondary" className="cursor-pointer hover:bg-secondary/80">
                     View Source List
                   </Badge>
@@ -962,15 +1220,25 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
               )}
             </div>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button
               onClick={handleRunPersonaSignals}
               disabled={runPersonaSignals.isPending || personaSignalRunning || !hasMembers}
+              variant="outline"
             >
               {personaSignalRunning
                 ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 : <Zap className="mr-2 h-4 w-4" />}
               {personaSignalRunning ? 'Detecting signals...' : 'Run Persona Signals'}
+            </Button>
+            <Button
+              onClick={handleGenerateBriefs}
+              disabled={generateBriefs.isPending || briefGenRunning || !hasMembers}
+            >
+              {briefGenRunning
+                ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                : <FileText className="mr-2 h-4 w-4" />}
+              {briefGenRunning ? 'Generating briefs...' : 'Generate Briefs'}
             </Button>
             {hasMembers && (
               <Button variant="outline" onClick={handleExport}>
@@ -1047,7 +1315,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         {/* Contacts Table */}
         {hasMembers && (
           <div>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
               <h2 className="text-lg font-semibold">Contacts</h2>
             </div>
             <DataTable
@@ -1066,21 +1334,21 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-4">
+      <div className="flex flex-wrap items-center gap-4">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/lists">
             <ArrowLeft className="mr-1 h-4 w-4" />
             Back
           </Link>
         </Button>
-        <div className="flex-1">
-          <h1 className="text-2xl font-bold">{list.name}</h1>
-          <div className="flex items-center gap-2 mt-1">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-2xl font-bold truncate">{list.name}</h1>
+          <div className="flex flex-wrap items-center gap-2 mt-1">
             <Badge variant="outline">{list.type}</Badge>
             {list.refreshEnabled && <Badge variant="secondary">Auto-refresh</Badge>}
           </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {canBuild && (
             <Button
               onClick={handleBuild}
@@ -1170,7 +1438,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             <CardTitle className="text-sm font-medium">Total TAM</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-2xl font-bold">{formatNumber(funnel?.stages?.tam ?? list.memberCount)}</p>
+            <p className="text-2xl font-bold">{formatNumber(tamCount || list.memberCount)}</p>
           </CardContent>
         </Card>
         <Card>
@@ -1204,11 +1472,11 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
       {/* Members Table with Stage Actions */}
       {hasMembers &&
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
           <h2 className="text-lg font-semibold">
             {selectedStage === 'all' ? 'All Members' : `${STAGE_CONFIG[selectedStage]?.label ?? selectedStage} Members`}
           </h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {selectedStage === 'tam' && (funnel?.stages?.tam ?? 0) > 0 && (
               <Button
                 onClick={handleApplyMarketSignals}

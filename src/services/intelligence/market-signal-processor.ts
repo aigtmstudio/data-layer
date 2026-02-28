@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, desc, sql, inArray } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, isNull, gte } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 
@@ -299,22 +299,36 @@ export class MarketSignalProcessor {
     const db = getDb();
     const log = logger.child({ clientId, signalId, segments: affectedSegments });
 
-    // Load all TAM + active_segment companies for this client
-    // TAM companies may be promoted; active_segment companies accumulate additional signal records
-    const tamCompanies = await db
-      .select()
+    // Load TAM + active_segment companies for this client, filtered to strong ICP fits only (>= 0.65).
+    // This skips weak-fit companies to save LLM costs and keep the pipeline focused.
+    const ICP_FIT_THRESHOLD = '0.65';
+    const rows = await db
+      .select({ company: schema.companies })
       .from(schema.companies)
+      .innerJoin(
+        schema.listMembers,
+        and(
+          eq(schema.listMembers.companyId, schema.companies.id),
+          isNull(schema.listMembers.removedAt),
+        ),
+      )
       .where(and(
         eq(schema.companies.clientId, clientId),
         inArray(schema.companies.pipelineStage, ['tam', 'active_segment']),
+        gte(schema.listMembers.icpFitScore, ICP_FIT_THRESHOLD),
       ));
+    // Deduplicate in case a company appears in multiple lists
+    const seen = new Set<string>();
+    const tamCompanies = rows
+      .map(r => r.company)
+      .filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
 
     if (tamCompanies.length === 0) {
-      log.debug('No TAM/active companies to evaluate');
+      log.debug('No TAM/active companies with strong ICP fit to evaluate');
       return;
     }
 
-    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM/active companies against market signal');
+    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM/active companies (ICP >= 65%) against market signal');
 
     // Get promotion prompt
     let promotionPrompt = PROMOTION_PROMPT;

@@ -1,6 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray } from 'drizzle-orm';
 
 export const jobRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/jobs
@@ -27,7 +27,31 @@ export const jobRoutes: FastifyPluginAsync = async (app) => {
         .orderBy(desc(schema.jobs.createdAt))
         .limit(limit);
 
-      return { data: jobs };
+      // Aggregate LLM costs per job
+      const jobIds = jobs.map(j => j.id);
+      let costMap = new Map<string, { llmCostUsd: string; llmCalls: number }>();
+
+      if (jobIds.length > 0) {
+        const costSums = await db
+          .select({
+            jobId: schema.llmUsage.jobId,
+            llmCostUsd: sql<string>`coalesce(sum(${schema.llmUsage.totalCostUsd}), 0)::text`,
+            llmCalls: sql<number>`count(*)::int`,
+          })
+          .from(schema.llmUsage)
+          .where(inArray(schema.llmUsage.jobId, jobIds))
+          .groupBy(schema.llmUsage.jobId);
+
+        costMap = new Map(costSums.map(c => [c.jobId!, { llmCostUsd: c.llmCostUsd, llmCalls: c.llmCalls }]));
+      }
+
+      const enrichedJobs = jobs.map(j => ({
+        ...j,
+        llmCostUsd: costMap.get(j.id)?.llmCostUsd ?? '0',
+        llmCalls: costMap.get(j.id)?.llmCalls ?? 0,
+      }));
+
+      return { data: enrichedJobs };
     },
   );
 
@@ -36,7 +60,23 @@ export const jobRoutes: FastifyPluginAsync = async (app) => {
     const db = getDb();
     const [job] = await db.select().from(schema.jobs).where(eq(schema.jobs.id, request.params.id));
     if (!job) return reply.status(404).send({ error: 'Job not found' });
-    return { data: job };
+
+    // Get LLM cost for this specific job
+    const [cost] = await db
+      .select({
+        llmCostUsd: sql<string>`coalesce(sum(${schema.llmUsage.totalCostUsd}), 0)::text`,
+        llmCalls: sql<number>`count(*)::int`,
+      })
+      .from(schema.llmUsage)
+      .where(eq(schema.llmUsage.jobId, job.id));
+
+    return {
+      data: {
+        ...job,
+        llmCostUsd: cost?.llmCostUsd ?? '0',
+        llmCalls: cost?.llmCalls ?? 0,
+      },
+    };
   });
 
   // POST /api/jobs/:id/cancel

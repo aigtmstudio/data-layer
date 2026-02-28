@@ -51,12 +51,14 @@ export class ExaProvider extends BaseProvider implements DataProvider {
       const raw = await this.request<ExaSearchResponse>('post', '/search', { body });
 
       const companies = raw.results.map(mapExaResultToCompany);
+      // Exa pricing: $7/1k search requests + $1/1k content pages
+      const cost = 0.007 + raw.results.length * 0.001;
       return {
         success: true,
         data: companies,
         totalResults: companies.length,
         hasMore: false,
-        creditsConsumed: 1,
+        creditsConsumed: cost,
         fieldsPopulated: ['name', 'domain', 'description'],
         qualityScore: 0.4,
       };
@@ -92,10 +94,13 @@ export class ExaProvider extends BaseProvider implements DataProvider {
 
       const raw = await this.request<ExaSearchResponse>('post', '/search', { body });
 
+      // Exa pricing: $7/1k search + $1/1k content pages = $0.008 for 1 result
+      const cost = 0.007 + raw.results.length * 0.001;
+
       if (!raw.results.length) {
         return {
           success: false, data: null, error: 'No results found',
-          creditsConsumed: 1, fieldsPopulated: [], qualityScore: 0,
+          creditsConsumed: cost, fieldsPopulated: [], qualityScore: 0,
         };
       }
 
@@ -105,7 +110,7 @@ export class ExaProvider extends BaseProvider implements DataProvider {
       return {
         success: true,
         data: unified,
-        creditsConsumed: 1,
+        creditsConsumed: cost,
         fieldsPopulated,
         qualityScore: Math.min(fieldsPopulated.length / 15, 1),
       };

@@ -1,5 +1,5 @@
 import { getDb, schema } from '../../db/index.js';
-import { eq, ne, and, or, inArray, ilike, isNull, sql } from 'drizzle-orm';
+import { eq, ne, and, or, inArray, ilike, isNull, gte, sql } from 'drizzle-orm';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import type { IcpFilters } from '../../db/schema/icps.js';
 import type { SourceRecord } from '../../db/schema/companies.js';
@@ -558,6 +558,7 @@ export class ListBuilder {
         eq(schema.listMembers.listId, listId),
         isNull(schema.listMembers.removedAt),
         eq(schema.companies.pipelineStage, 'active_segment'),
+        gte(schema.listMembers.icpFitScore, '0.65'),
       ));
 
     if (activeMembers.length === 0) {

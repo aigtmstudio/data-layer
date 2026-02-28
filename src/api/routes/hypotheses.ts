@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, schema } from '../../db/index.js';
 import type { ServiceContainer } from '../../index.js';
 import { logger } from '../../lib/logger.js';
+import { withLlmContext } from '../../lib/llm-tracker.js';
 
 const signalLevels = ['market', 'company', 'persona'] as const;
 const signalCategories = [
@@ -104,45 +105,47 @@ export const hypothesisRoutes: FastifyPluginAsync<{ container: ServiceContainer 
     reply.status(202).send({ data: { jobId: job.id, message: 'Hypothesis generation started' } });
 
     // Run generation in background — dispatch to the right method based on signalLevel
-    try {
-      let hypotheses: typeof schema.signalHypotheses.$inferSelect[];
-      switch (body.signalLevel) {
-        case 'market':
-          hypotheses = await hypothesisGenerator.generateMarketHypotheses(body.clientId, body.icpId);
-          break;
-        case 'company':
-          hypotheses = await hypothesisGenerator.generateCompanyHypotheses(body.clientId, body.icpId);
-          break;
-        case 'persona':
-          if (!body.personaId) {
-            throw new Error('personaId is required for persona-level hypothesis generation');
-          }
-          hypotheses = await hypothesisGenerator.generatePersonaHypotheses(body.clientId, body.icpId, body.personaId);
-          break;
+    withLlmContext({ clientId: body.clientId, jobId: job.id }, async () => {
+      try {
+        let hypotheses: typeof schema.signalHypotheses.$inferSelect[];
+        switch (body.signalLevel) {
+          case 'market':
+            hypotheses = await hypothesisGenerator.generateMarketHypotheses(body.clientId, body.icpId);
+            break;
+          case 'company':
+            hypotheses = await hypothesisGenerator.generateCompanyHypotheses(body.clientId, body.icpId);
+            break;
+          case 'persona':
+            if (!body.personaId) {
+              throw new Error('personaId is required for persona-level hypothesis generation');
+            }
+            hypotheses = await hypothesisGenerator.generatePersonaHypotheses(body.clientId, body.icpId, body.personaId);
+            break;
+        }
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'completed',
+            processedItems: hypotheses.length,
+            output: { hypothesisCount: hypotheses.length, signalLevel: body.signalLevel },
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
+        log.info({ jobId: job.id, count: hypotheses.length }, 'Hypothesis generation completed');
+      } catch (error) {
+        log.error({ error, jobId: job.id }, 'Hypothesis generation failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            errors: [{ item: 'generation', error: String(error), timestamp: new Date().toISOString() }],
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
       }
-      await db
-        .update(schema.jobs)
-        .set({
-          status: 'completed',
-          processedItems: hypotheses.length,
-          output: { hypothesisCount: hypotheses.length, signalLevel: body.signalLevel },
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.jobs.id, job.id));
-      log.info({ jobId: job.id, count: hypotheses.length }, 'Hypothesis generation completed');
-    } catch (error) {
-      log.error({ error, jobId: job.id }, 'Hypothesis generation failed');
-      await db
-        .update(schema.jobs)
-        .set({
-          status: 'failed',
-          errors: [{ item: 'generation', error: String(error), timestamp: new Date().toISOString() }],
-          completedAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(schema.jobs.id, job.id));
-    }
+    });
   });
 
   // PATCH /api/hypotheses/bulk-status

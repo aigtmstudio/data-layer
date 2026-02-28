@@ -129,7 +129,7 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
       return {
         success: true,
         data: unified,
-        creditsConsumed: 1,
+        creditsConsumed: raw.credits_consumed ?? 1,
         fieldsPopulated,
         qualityScore: Math.min(fieldsPopulated.length / 15, 1),
       };
@@ -230,7 +230,7 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
       return {
         success: true,
         data: unified,
-        creditsConsumed: 1,
+        creditsConsumed: raw.credits_consumed ?? 1,
         fieldsPopulated,
         qualityScore: Math.min(fieldsPopulated.length / 12, 1),
       };

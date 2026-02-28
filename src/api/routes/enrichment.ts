@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getDb, schema } from '../../db/index.js';
 import type { ServiceContainer } from '../../index.js';
 import { JOB_TYPES } from '../../services/scheduler/index.js';
+import { withLlmContext } from '../../lib/llm-tracker.js';
 
 const enrichCompaniesBody = z.object({
   clientId: z.string().uuid(),
@@ -42,17 +43,19 @@ export const enrichmentRoutes: FastifyPluginAsync<{ container: ServiceContainer 
       .returning();
 
     // Enqueue for async processing
-    await opts.container.scheduler.enqueue(JOB_TYPES.ENRICHMENT, {
-      clientId: body.clientId,
-      domains: body.domains,
-      jobId: job.id,
-      options: {
-        discoverContacts: body.discoverContacts,
-        findEmails: body.findEmails,
-        verifyEmails: body.verifyEmails,
-        personaFilters: body.personaFilters,
-      },
-    });
+    await withLlmContext({ clientId: body.clientId, jobId: job.id }, () =>
+      opts.container.scheduler.enqueue(JOB_TYPES.ENRICHMENT, {
+        clientId: body.clientId,
+        domains: body.domains,
+        jobId: job.id,
+        options: {
+          discoverContacts: body.discoverContacts,
+          findEmails: body.findEmails,
+          verifyEmails: body.verifyEmails,
+          personaFilters: body.personaFilters,
+        },
+      })
+    );
 
     return reply.status(202).send({ data: job });
   });

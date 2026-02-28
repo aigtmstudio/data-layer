@@ -8,7 +8,7 @@ export interface JinaReadResponse {
     description: string;
     url: string;
     content: string;
-    usage: {
+    usage?: {
       tokens: number;
     };
   };

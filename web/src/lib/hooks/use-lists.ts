@@ -180,6 +180,12 @@ export function useDeepEnrich() {
   });
 }
 
+export function useGenerateBriefs() {
+  return useMutation({
+    mutationFn: (id: string) => listsApi.generateBriefs(id),
+  });
+}
+
 export function useDeleteList() {
   const qc = useQueryClient();
   return useMutation({

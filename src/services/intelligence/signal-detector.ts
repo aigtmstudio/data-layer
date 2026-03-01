@@ -276,6 +276,13 @@ export class SignalDetector {
         jsonText = jsonText.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
       }
 
+      // If the model appended prose after the JSON, extract just the array
+      const arrayStart = jsonText.indexOf('[');
+      const arrayEnd = jsonText.lastIndexOf(']');
+      if (arrayStart !== -1 && arrayEnd > arrayStart) {
+        jsonText = jsonText.slice(arrayStart, arrayEnd + 1);
+      }
+
       const parsed = JSON.parse(jsonText);
       if (!Array.isArray(parsed)) return [];
 

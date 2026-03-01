@@ -38,6 +38,8 @@ export interface TrendingTopic {
     relevanceScore: number;
     detectedAt: string;
   }[];
+  /** Whether this topic has supporting signals from social media (tweets) */
+  hasSocialSignals?: boolean;
 }
 
 export interface WebinarAngle {

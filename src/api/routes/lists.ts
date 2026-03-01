@@ -20,6 +20,12 @@ const updateScheduleBody = z.object({
   refreshCron: z.string().optional(),
 });
 
+const buildBody = z.object({
+  limit: z.number().int().min(1).max(1000).optional(),
+  skipExistingDb: z.boolean().optional(),
+  providerOrder: z.array(z.string()).optional(),
+});
+
 export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = async (app, opts) => {
   // GET /api/lists
   app.get<{ Querystring: { clientId?: string } }>('/', async (request) => {
@@ -30,6 +36,12 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
     }
     const lists = await db.select().from(schema.lists).where(and(...conditions));
     return { data: lists };
+  });
+
+  // GET /api/lists/providers — return provider names that support company_search, in priority order
+  app.get('/providers', async () => {
+    const providers = opts.container.orchestrator.getProvidersByCapability('company_search');
+    return { data: providers };
   });
 
   // GET /api/lists/:id
@@ -50,6 +62,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
 
   // POST /api/lists/:id/build
   app.post<{ Params: { id: string } }>('/:id/build', async (request, reply) => {
+    const buildOptions = buildBody.parse(request.body ?? {});
     const db = getDb();
     const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, request.params.id));
     if (!list || !list.icpId) {
@@ -76,6 +89,9 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           icpId: list.icpId!,
           personaId: list.personaId ?? undefined,
           jobId: job.id,
+          limit: buildOptions.limit,
+          skipExistingDb: buildOptions.skipExistingDb,
+          providerOrder: buildOptions.providerOrder,
         })
     ).catch(async (error) => {
         logger.error({ error, listId: list.id, jobId: job.id }, 'List build with discovery failed');

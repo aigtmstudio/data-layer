@@ -66,3 +66,10 @@ export async function bulkUpdateStatus(ids: string[], status: string): Promise<v
 export async function deleteHypothesis(id: string): Promise<void> {
   await apiClient.delete(`/api/hypotheses/${id}`);
 }
+
+export async function clearHypotheses(clientId: string, signalLevel?: SignalLevel): Promise<{ deleted: number }> {
+  const query = new URLSearchParams({ clientId });
+  if (signalLevel) query.set('signalLevel', signalLevel);
+  const res = await apiClient.delete<ApiResponse<{ deleted: number }>>(`/api/hypotheses/clear?${query}`);
+  return res.data;
+}

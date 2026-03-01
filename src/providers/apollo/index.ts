@@ -57,14 +57,10 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
           params.employeeCountMin, params.employeeCountMax,
         );
       }
-      if (params.revenueMin != null || params.revenueMax != null) {
-        body.organization_revenue_ranges = buildRevenueRanges(
-          params.revenueMin, params.revenueMax,
-        );
-      }
-      if (params.fundingStages?.length) {
-        body.organization_latest_funding_stage_cd = params.fundingStages.map(normalizeFundingStage);
-      }
+
+      // Revenue and funding stage are intentionally excluded — they over-constrain
+      // Apollo searches and commonly return 0 results. Post-discovery ICP scoring
+      // handles these dimensions instead.
 
       // Build location filters: countries + states + cities
       // Apollo expects full country names (e.g. "United Kingdom"), not ISO codes (e.g. "GB")
@@ -74,8 +70,13 @@ export class ApolloProvider extends BaseProvider implements DataProvider {
       if (params.cities?.length) locations.push(...params.cities);
       if (locations.length) body.organization_locations = locations;
 
-      // Note: q_organization_keyword_tags expects Apollo's specific taxonomy tags,
-      // not freeform ICP keywords. Skipping — scoring handles keyword matching.
+      // q_keywords supports freeform keyword search across company name/description.
+      // Unlike q_organization_keyword_tags (which requires Apollo taxonomy IDs), this
+      // accepts plain strings. Join include keywords into a single space-separated query.
+      if (params.keywords?.length) {
+        body.q_keywords = params.keywords.join(' ');
+      }
+
       // Note: currently_using_any_of_technology_uids requires Apollo UIDs, not human-readable
       // tech names like "React" or "PoS". Skipping — scoring handles tech stack matching.
 
@@ -305,55 +306,3 @@ function buildEmployeeRanges(min?: number, max?: number): string[] {
   return ranges.length > 0 ? ranges : ['1,1000000'];
 }
 
-/**
- * Apollo expects revenue as predefined range buckets.
- */
-const REVENUE_RANGE_BUCKETS = [
-  [0, 1_000_000],           // $0–$1M
-  [1_000_000, 10_000_000],  // $1M–$10M
-  [10_000_000, 50_000_000], // $10M–$50M
-  [50_000_000, 100_000_000],
-  [100_000_000, 500_000_000],
-  [500_000_000, 1_000_000_000],
-  [1_000_000_000, 10_000_000_000],
-] as const;
-
-function buildRevenueRanges(min?: number, max?: number): string[] {
-  const lo = min ?? 0;
-  const hi = max ?? Infinity;
-  const ranges: string[] = [];
-  for (const [bucketMin, bucketMax] of REVENUE_RANGE_BUCKETS) {
-    if (bucketMax >= lo && bucketMin <= hi) {
-      ranges.push(`${bucketMin},${bucketMax}`);
-    }
-  }
-  return ranges.length > 0 ? ranges : [`${lo},${max ?? 10000000000}`];
-}
-
-/**
- * Normalize freeform funding stage strings to Apollo's expected codes.
- * Apollo uses lowercase_underscore codes: seed, series_a, series_b, etc.
- */
-const FUNDING_STAGE_MAP: Record<string, string> = {
-  // Direct matches
-  seed: 'seed', angel: 'angel', venture: 'venture',
-  series_a: 'series_a', series_b: 'series_b', series_c: 'series_c',
-  series_d: 'series_d', series_e: 'series_e', series_f: 'series_f',
-  series_unknown: 'series_unknown',
-  pre_ipo: 'pre_ipo', ipo: 'ipo',
-  private_equity: 'private_equity', debt_financing: 'debt_financing',
-  grant: 'grant', other: 'other',
-  // Common freeform variations
-  'series a': 'series_a', 'series b': 'series_b', 'series c': 'series_c',
-  'series d': 'series_d', 'series e': 'series_e', 'series f': 'series_f',
-  'pre-seed': 'seed', preseed: 'seed', 'pre seed': 'seed',
-  'pre-ipo': 'pre_ipo', 'pre ipo': 'pre_ipo',
-  'private equity': 'private_equity', pe: 'private_equity',
-  'debt financing': 'debt_financing', debt: 'debt_financing',
-  'early stage': 'seed', 'early-stage': 'seed',
-  'growth': 'series_unknown', 'late stage': 'series_unknown',
-};
-
-function normalizeFundingStage(stage: string): string {
-  return FUNDING_STAGE_MAP[stage.toLowerCase()] ?? stage.toLowerCase().replace(/\s+/g, '_');
-}

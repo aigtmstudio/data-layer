@@ -20,6 +20,8 @@ interface SignalRecord {
   summary: string | null;
   sourceUrl: string | null;
   sourceDomain: string | null;
+  /** e.g. 'exa_news_search', 'exa_tweet_search', 'exa_news_trending' */
+  sourceName: string | null;
   relevanceScore: number;
   affectedSegments: string[];
   detectedAt: string;
@@ -43,6 +45,8 @@ interface AggregatedSignalData {
   }[];
   /** Unique source domains seen across all signals, with frequency */
   sourceDomainFrequency: { domain: string; count: number }[];
+  /** Breakdown by source type (news vs tweet vs trending) */
+  sourceTypeBreakdown: { sourceType: string; count: number }[];
   topSegments: { segment: string; mentionCount: number }[];
   activeHypotheses: { hypothesis: string; signalCategory: string; affectedSegments: string[]; evidenceCount: number }[];
   companySignalTrends: { signalType: string; count: number; avgStrength: number }[];
@@ -83,6 +87,14 @@ Indicators of high buzz:
 
 **AVOID**: Evergreen themes like "digital transformation", "AI adoption", "supply chain challenges" UNLESS there is a specific, dated trigger (e.g., a new regulation, a major vendor announcement, a market crash).
 
+## Social Signal Weighting
+
+Signals marked as TWEET represent social media discussions (Twitter/X). Use them as social proof:
+- A topic with BOTH news articles AND tweet discussions = strong buzz signal (boost buzzScore by 10-15 points)
+- Tweet-only topics may indicate emerging trends not yet covered by media — flag these if they have 3+ tweet signals
+- News-only topics without any social discussion may be less impactful for B2B audiences
+- TRENDING signals are ICP-driven discoveries outside the hypothesis framework — they may reveal important stories the hypotheses missed
+
 ## Venn Overlap
 
 Find the overlap between:
@@ -121,7 +133,8 @@ Return ONLY valid JSON matching this schema:
       "reasoning": "string — why this CURRENT story creates a timely opportunity",
       "overlapScore": number (0.0-1.0)
     },
-    "supportingSignals": [{"headline": "string", "sourceUrl": "string|null", "sourceDomain": "string|null", "relevanceScore": number, "detectedAt": "string"}]
+    "supportingSignals": [{"headline": "string", "sourceUrl": "string|null", "sourceDomain": "string|null", "relevanceScore": number, "detectedAt": "string"}],
+    "hasSocialSignals": boolean
   }]
 }`;
 
@@ -349,14 +362,15 @@ export class MarketBuzzGenerator {
     const cutoffStr = cutoff.toISOString();
     const halfLifeDays = Math.max(timeWindowDays / 4, 2); // e.g. 7.5 days for a 30-day window
 
-    // 1. Recent processed market signals
+    // 1. Recent processed market signals — filter by detectedAt (actual signal date)
+    //    to avoid surfacing old articles that were recently ingested
     const recentSignals = await db
       .select()
       .from(schema.marketSignals)
       .where(and(
         eq(schema.marketSignals.clientId, clientId),
         eq(schema.marketSignals.processed, true),
-        gte(schema.marketSignals.createdAt, cutoff),
+        gte(schema.marketSignals.detectedAt, cutoff),
       ))
       .orderBy(desc(schema.marketSignals.relevanceScore))
       .limit(200);
@@ -372,6 +386,7 @@ export class MarketBuzzGenerator {
         summary: s.summary,
         sourceUrl: s.sourceUrl,
         sourceDomain: this.extractDomain(s.sourceUrl),
+        sourceName: s.sourceName,
         relevanceScore: relevance,
         affectedSegments: (s.affectedSegments as string[]) ?? [],
         detectedAt: detected.toISOString(),
@@ -393,6 +408,16 @@ export class MarketBuzzGenerator {
     }
     const sourceDomainFrequency = Array.from(domainCounts.entries())
       .map(([domain, count]) => ({ domain, count }))
+      .sort((a, b) => b.count - a.count);
+
+    // Source type breakdown (news vs tweet vs trending)
+    const sourceTypeCounts = new Map<string, number>();
+    for (const s of enriched) {
+      const sourceType = s.sourceName ?? 'unknown';
+      sourceTypeCounts.set(sourceType, (sourceTypeCounts.get(sourceType) ?? 0) + 1);
+    }
+    const sourceTypeBreakdown = Array.from(sourceTypeCounts.entries())
+      .map(([sourceType, count]) => ({ sourceType, count }))
       .sort((a, b) => b.count - a.count);
 
     // Group by category
@@ -483,6 +508,7 @@ export class MarketBuzzGenerator {
       },
       byCategory,
       sourceDomainFrequency,
+      sourceTypeBreakdown,
       topSegments,
       activeHypotheses,
       companySignalTrends,
@@ -585,7 +611,10 @@ export class MarketBuzzGenerator {
       try { systemPrompt = await this.promptConfig.getPrompt('buzz.trending_topics.system'); } catch { /* default */ }
     }
 
+    const today = new Date().toISOString().split('T')[0];
     const userMessage = [
+      `## Today's Date: ${today}`,
+      '',
       '## Market Signal Data',
       `Time window: ${aggregated.timeWindow.days} days (${aggregated.timeWindow.from} to ${aggregated.timeWindow.to})`,
       `Total signals analyzed: ${aggregated.totalSignals}`,
@@ -595,15 +624,23 @@ export class MarketBuzzGenerator {
         `- ${d.domain}: ${d.count} signal${d.count > 1 ? 's' : ''}`
       ).join('\n'),
       '',
+      '### Signal Source Mix',
+      aggregated.sourceTypeBreakdown.map(s =>
+        `- ${s.sourceType}: ${s.count} signals`
+      ).join('\n'),
+      '',
       '### Signals by Category (sorted by recency-weighted relevance)',
       '> Each signal includes: recencyWeight (1.0=today, decays with age), ageDays, sourceDomain, and weightedRelevance.',
+      '> Signals tagged TWEET are from social media. Signals tagged TRENDING are from ICP-driven broad searches.',
       ...aggregated.byCategory.map(cat =>
         `**${cat.category}** (${cat.count} signals, avg relevance: ${cat.avgRelevance.toFixed(2)}, avg recency: ${cat.avgRecencyWeight.toFixed(2)}):\n` +
         cat.signals.slice(0, 12).map(s =>
           `- ${s.headline}${s.summary ? ` — ${s.summary.slice(0, 120)}` : ''}` +
           ` [relevance: ${s.relevanceScore.toFixed(2)}, recency: ${s.recencyWeight}, age: ${s.ageDays}d` +
           `${s.sourceDomain ? `, source: ${s.sourceDomain}` : ''}` +
-          `${s.sourceUrl ? `, url: ${s.sourceUrl}` : ''}]`
+          `${s.sourceUrl ? `, url: ${s.sourceUrl}` : ''}` +
+          `${s.sourceName?.includes('tweet') ? ', type: TWEET' : ''}` +
+          `${s.sourceName?.includes('trending') ? ', type: TRENDING' : ''}]`
         ).join('\n'),
       ),
       '',

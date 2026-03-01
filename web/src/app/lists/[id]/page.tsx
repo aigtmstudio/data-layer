@@ -4,7 +4,7 @@ import { use, useState, useMemo, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
-import { useList, useListMembers, useRefreshList, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useContactSignals, useDeleteList, useGenerateBriefs, listKeys } from '@/lib/hooks/use-lists';
+import { useList, useListMembers, useUpdateListSchedule, useFunnelStats, useRunCompanySignals, useBuildList, useBuildStatus, useBuildContacts, useRunPersonaSignals, useApplyMarketSignals, useMemberSignals, useContactSignals, useDeleteList, useGenerateBriefs, useAvailableProviders, listKeys } from '@/lib/hooks/use-lists';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { useAppStore } from '@/lib/store';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
@@ -845,7 +845,6 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const { selectedClientId } = useAppStore();
   const { data: list, isLoading, isError, refetch } = useList(id);
   const { data: funnel } = useFunnelStats(id);
-  const refreshList = useRefreshList();
   const triggerExport = useTriggerExport();
   const updateSchedule = useUpdateListSchedule();
   const runCompanySignals = useRunCompanySignals();
@@ -878,7 +877,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   }, [funnel, stageInitialised]);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [refreshEnabled, setRefreshEnabled] = useState(false);
-  const [refreshCron, setRefreshCron] = useState('');
+  const [refreshDays, setRefreshDays] = useState('7');
   const [buildingJobId, setBuildingJobId] = useState<string | null>(null);
   const { data: buildJob } = useBuildStatus(buildingJobId ? id : null);
 
@@ -904,6 +903,13 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
   const isContactBuildRunning = shouldPollContactBuild &&
     contactBuildJob?.status !== 'completed' && contactBuildJob?.status !== 'failed';
+
+  // Build options dialog state
+  const [buildOptionsOpen, setBuildOptionsOpen] = useState(false);
+  const [buildLimit, setBuildLimit] = useState('100');
+  const [skipExistingDb, setSkipExistingDb] = useState(false);
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+  const { data: availableProviders } = useAvailableProviders();
 
   // Find Buying Committee dialog state
   const [buyingCommitteeOpen, setBuyingCommitteeOpen] = useState(false);
@@ -1033,18 +1039,18 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     return <ErrorBanner title="List not found" description="Could not load list data. The API may be unavailable." retry={() => refetch()} />;
   }
 
-  const handleRefresh = async () => {
+  const handleBuildSubmit = async () => {
+    setBuildOptionsOpen(false);
+    const limitNum = parseInt(buildLimit, 10);
     try {
-      await refreshList.mutateAsync(id);
-      toast.success('Refresh started');
-    } catch {
-      toast.error('Failed to refresh');
-    }
-  };
-
-  const handleBuild = async () => {
-    try {
-      const { jobId } = await buildList.mutateAsync(id);
+      const { jobId } = await buildList.mutateAsync({
+        id,
+        options: {
+          limit: isNaN(limitNum) ? undefined : limitNum,
+          skipExistingDb: skipExistingDb || undefined,
+          providerOrder: selectedProviders.length > 0 ? selectedProviders : undefined,
+        },
+      });
       setBuildingJobId(jobId);
       toast.success('Building list — discovering companies from providers...');
     } catch {
@@ -1159,13 +1165,33 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
     setBuyingCommitteeOpen(true);
   };
 
+  const daysToCron = (days: string): string => {
+    const d = parseInt(days, 10);
+    if (d === 1) return '0 9 * * *';          // daily at 9am
+    if (d === 7) return '0 9 * * 1';          // weekly on Monday
+    if (d === 14) return '0 9 1,15 * *';      // 1st and 15th
+    if (d === 30) return '0 9 1 * *';         // 1st of month
+    return `0 9 */${d} * *`;                  // every N days
+  };
+
+  const cronToDays = (cron: string): string => {
+    if (!cron) return '7';
+    if (cron === '0 9 * * *') return '1';
+    if (cron === '0 9 * * 1') return '7';
+    if (cron === '0 9 1,15 * *') return '14';
+    if (cron === '0 9 1 * *') return '30';
+    const match = cron.match(/\*\/(\d+)/);
+    if (match) return match[1];
+    return '7';
+  };
+
   const handleSaveSchedule = async () => {
     try {
       await updateSchedule.mutateAsync({
         id,
         data: {
           refreshEnabled,
-          refreshCron: refreshEnabled ? refreshCron : undefined,
+          refreshCron: refreshEnabled ? daysToCron(refreshDays) : undefined,
         },
       });
       setScheduleOpen(false);
@@ -1177,7 +1203,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
   const openScheduleDialog = () => {
     setRefreshEnabled(list.refreshEnabled);
-    setRefreshCron(list.refreshCron || '0 9 * * 1');
+    setRefreshDays(cronToDays(list.refreshCron || '0 9 * * 1'));
     setScheduleOpen(true);
   };
 
@@ -1354,7 +1380,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         <div className="flex flex-wrap gap-2">
           {canBuild && (
             <Button
-              onClick={handleBuild}
+              onClick={() => setBuildOptionsOpen(true)}
               disabled={isBuildingList}
               variant={hasMembers ? 'outline' : 'default'}
             >
@@ -1365,34 +1391,10 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             </Button>
           )}
           {hasMembers && (
-            <>
-              <Button
-                onClick={handleApplyMarketSignals}
-                disabled={applyMarketSignals.isPending || applyingSignals}
-                variant="default"
-              >
-                {applyMarketSignals.isPending || applyingSignals
-                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  : <Radar className="mr-2 h-4 w-4" />}
-                {applyMarketSignals.isPending || applyingSignals ? 'Applying...' : 'Apply Market Signals'}
-              </Button>
-              <Button variant="outline" onClick={openScheduleDialog}>
-                <Clock className="mr-2 h-4 w-4" />
-                Schedule
-              </Button>
-              <Button variant="outline" onClick={handleRefresh} disabled={refreshList.isPending}>
-                {refreshList.isPending
-                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  : <RefreshCw className="mr-2 h-4 w-4" />}
-                {refreshList.isPending ? 'Refreshing...' : 'Refresh'}
-              </Button>
-              <Button variant="outline" onClick={handleExport} disabled={triggerExport.isPending}>
-                {triggerExport.isPending
-                  ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  : <Download className="mr-2 h-4 w-4" />}
-                {triggerExport.isPending ? 'Exporting...' : 'Export'}
-              </Button>
-            </>
+            <Button variant="outline" onClick={openScheduleDialog}>
+              <Clock className="mr-2 h-4 w-4" />
+              Schedule
+            </Button>
           )}
           <Button variant="outline" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
             <Trash2 className="mr-2 h-4 w-4" />
@@ -1413,7 +1415,7 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 : 'Assign an ICP to this list first, then build it to discover matching companies.'}
             </p>
             {canBuild && (
-              <Button onClick={handleBuild} size="lg">
+              <Button onClick={() => setBuildOptionsOpen(true)} size="lg">
                 <Play className="mr-2 h-5 w-5" />
                 Build List
               </Button>
@@ -1600,6 +1602,96 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         </DialogContent>
       </Dialog>
 
+      {/* Build Options Dialog */}
+      <Dialog open={buildOptionsOpen} onOpenChange={setBuildOptionsOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{list.memberCount > 0 ? 'Rebuild List' : 'Build List'}</DialogTitle>
+            <DialogDescription>Configure how companies are discovered and added to this list.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            {/* Target count */}
+            <div className="space-y-1.5">
+              <Label htmlFor="build-limit">Target companies to discover</Label>
+              <Input
+                id="build-limit"
+                type="number"
+                min={1}
+                max={1000}
+                value={buildLimit}
+                onChange={e => setBuildLimit(e.target.value)}
+                className="w-full"
+              />
+              <p className="text-xs text-muted-foreground">How many companies to discover from external providers (default: 100).</p>
+            </div>
+
+            {/* Skip existing DB companies */}
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="skip-existing">Only use newly discovered companies</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Off: also score companies already in your database. On: only add companies found in this run.</p>
+              </div>
+              <Switch
+                id="skip-existing"
+                checked={skipExistingDb}
+                onCheckedChange={setSkipExistingDb}
+              />
+            </div>
+
+            {/* Provider selection */}
+            {availableProviders && availableProviders.length > 0 && (
+              <div className="space-y-2">
+                <Label>Providers to use</Label>
+                <p className="text-xs text-muted-foreground">Providers are tried in this order. Uncheck to skip a provider.</p>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {availableProviders.map(provider => {
+                    const effectiveList = selectedProviders.length > 0 ? selectedProviders : availableProviders;
+                    const isChecked = effectiveList.includes(provider);
+                    return (
+                      <div key={provider} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`provider-${provider}`}
+                          checked={isChecked}
+                          onChange={e => {
+                            const current = selectedProviders.length > 0 ? selectedProviders : [...availableProviders];
+                            if (e.target.checked) {
+                              // Re-insert in original order
+                              const ordered = availableProviders.filter(p => [...current, provider].includes(p));
+                              setSelectedProviders(ordered);
+                            } else {
+                              setSelectedProviders(current.filter(p => p !== provider));
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        <label htmlFor={`provider-${provider}`} className="text-sm cursor-pointer font-mono">{provider}</label>
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedProviders.length > 0 && selectedProviders.length < availableProviders.length && (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground underline underline-offset-2"
+                    onClick={() => setSelectedProviders([])}
+                  >
+                    Reset to all providers
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setBuildOptionsOpen(false)}>Cancel</Button>
+            <Button onClick={handleBuildSubmit} disabled={isBuildingList}>
+              <Play className="mr-2 h-4 w-4" />
+              {list.memberCount > 0 ? 'Rebuild' : 'Build'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent className="sm:max-w-md">
@@ -1625,6 +1717,9 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
         <DialogContent className="sm:max-w-sm">
           <DialogHeader>
             <DialogTitle>Refresh Schedule</DialogTitle>
+            <DialogDescription>
+              Auto-refresh rebuilds the list on a recurring schedule to keep it fresh.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
@@ -1633,15 +1728,17 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
             </div>
             {refreshEnabled && (
               <div className="space-y-2">
-                <Label>Cron Expression</Label>
-                <Input
-                  value={refreshCron}
-                  onChange={(e) => setRefreshCron(e.target.value)}
-                  placeholder="0 9 * * 1"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Format: minute hour day month weekday. Example: &quot;0 9 * * 1&quot; = Every Monday at 9am
-                </p>
+                <Label>Refresh every</Label>
+                <Select value={refreshDays} onValueChange={setRefreshDays}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="7">Every 7 days</SelectItem>
+                    <SelectItem value="30">Every 30 days</SelectItem>
+                    <SelectItem value="90">Every 90 days</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             )}
             <div className="flex justify-end gap-2">

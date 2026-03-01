@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store';
-import { useHypotheses, useGenerateHypotheses, useUpdateHypothesis, useDeleteHypothesis } from '@/lib/hooks/use-hypotheses';
+import { useHypotheses, useGenerateHypotheses, useUpdateHypothesis, useDeleteHypothesis, useClearHypotheses } from '@/lib/hooks/use-hypotheses';
 import { useMarketSignals, useProcessSignals, useSearchEvidence } from '@/lib/hooks/use-market-signals';
 import { usePersonasV2 } from '@/lib/hooks/use-personas-v2';
 import { DataTable } from '@/components/shared/data-table';
@@ -79,6 +79,7 @@ function HypothesesSection({
   const generateHypotheses = useGenerateHypotheses();
   const updateHypothesis = useUpdateHypothesis();
   const deleteHypothesis = useDeleteHypothesis();
+  const clearHypotheses = useClearHypotheses();
 
   const handleGenerate = async () => {
     try {
@@ -109,6 +110,16 @@ function HypothesesSection({
       toast.success('Hypothesis deleted');
     } catch {
       toast.error('Failed to delete');
+    }
+  };
+
+  const handleClear = async () => {
+    if (!confirm(`Clear all ${signalLevel} hypotheses? This cannot be undone.`)) return;
+    try {
+      const result = await clearHypotheses.mutateAsync({ clientId, signalLevel });
+      toast.success(`Cleared ${result.deleted} hypothes${result.deleted === 1 ? 'is' : 'es'}`);
+    } catch {
+      toast.error('Failed to clear hypotheses');
     }
   };
 
@@ -191,14 +202,25 @@ function HypothesesSection({
             {activeCount} active hypothesis{activeCount !== 1 ? 'es' : ''}
           </p>
         </div>
-        <Button
-          onClick={handleGenerate}
-          disabled={generateHypotheses.isPending}
-          size="sm"
-        >
-          <Sparkles className="mr-2 h-4 w-4" />
-          {generateHypotheses.isPending ? 'Generating...' : 'Generate'}
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={handleClear}
+            disabled={clearHypotheses.isPending || !hypotheses?.length}
+            size="sm"
+            variant="outline"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            {clearHypotheses.isPending ? 'Clearing...' : 'Clear'}
+          </Button>
+          <Button
+            onClick={handleGenerate}
+            disabled={generateHypotheses.isPending}
+            size="sm"
+          >
+            <Sparkles className="mr-2 h-4 w-4" />
+            {generateHypotheses.isPending ? 'Generating...' : 'Generate'}
+          </Button>
+        </div>
       </div>
       {isLoading ? (
         <div className="py-4 text-center text-muted-foreground">Loading...</div>

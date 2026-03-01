@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useClient, useUpdateClient, useDeleteClient } from '@/lib/hooks/use-clients';
 import { useIcps, useCreateIcp, useDeleteIcp } from '@/lib/hooks/use-icps';
 import { useCreditBalance, useCreditHistory, useAddCredits } from '@/lib/hooks/use-credits';
-import { useHypotheses, useGenerateHypotheses, useCreateHypothesis, useUpdateHypothesis, useDeleteHypothesis } from '@/lib/hooks/use-hypotheses';
+import { useHypotheses, useGenerateHypotheses, useCreateHypothesis, useUpdateHypothesis, useDeleteHypothesis, useClearHypotheses } from '@/lib/hooks/use-hypotheses';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -106,6 +106,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const createHypothesis = useCreateHypothesis();
   const updateHypothesis = useUpdateHypothesis();
   const deleteHypothesisAction = useDeleteHypothesis();
+  const clearHypotheses = useClearHypotheses();
 
   // Stop polling when new hypotheses appear after generation
   useEffect(() => {
@@ -422,6 +423,22 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
               Testable hypotheses about what market signals indicate buying urgency.
             </p>
             <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={async () => {
+                  if (!confirm('Clear all hypotheses? This cannot be undone.')) return;
+                  try {
+                    const result = await clearHypotheses.mutateAsync({ clientId: id });
+                    toast.success(`Cleared ${result.deleted} hypothes${result.deleted === 1 ? 'is' : 'es'}`);
+                  } catch {
+                    toast.error('Failed to clear hypotheses');
+                  }
+                }}
+                disabled={clearHypotheses.isPending || !hypotheses?.length}
+              >
+                <Trash2 className="mr-2 h-4 w-4" />
+                {clearHypotheses.isPending ? 'Clearing...' : 'Clear'}
+              </Button>
               <Button
                 variant="outline"
                 onClick={() => setNewHypothesisOpen(true)}

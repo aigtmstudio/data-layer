@@ -131,14 +131,16 @@ export class ExaProvider extends BaseProvider implements DataProvider {
     query: string;
     numResults?: number;
     startPublishedDate?: string;
+    category?: 'news' | 'tweet';
   }): Promise<ExaSearchResponse> {
+    const cat = params.category ?? 'news';
     const body: Record<string, unknown> = {
       query: params.query,
       numResults: params.numResults ?? 5,
       type: 'auto',
-      category: 'news',
+      category: cat,
       contents: {
-        text: { maxCharacters: 2000 },
+        text: { maxCharacters: cat === 'tweet' ? 500 : 2000 },
       },
     };
     if (params.startPublishedDate) {

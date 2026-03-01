@@ -132,6 +132,8 @@ export interface DiscoveryResult {
   providersUsed: string[];
   totalCost: number;
   warnings?: string[];
+  /** IDs of companies newly inserted into the DB during this discovery run */
+  newCompanyIds: string[];
 }
 
 export const AI_DISCOVERY_PROMPT = `List {{limit}} real companies that match this ideal customer profile. Only include companies you are confident actually exist.
@@ -180,6 +182,8 @@ export class CompanyDiscoveryService {
     personaId?: string;
     limit?: number;
     jobId?: string;
+    /** Override provider search order (names must match registered provider names) */
+    providerOrder?: string[];
   }): Promise<DiscoveryResult> {
     const db = getDb();
     const limit = params.limit ?? 100;
@@ -233,7 +237,12 @@ export class CompanyDiscoveryService {
 
     // 3. Search providers
     const { result: discovered, providersUsed, totalCost, skippedDueToCredits } =
-      await this.orchestrator.searchCompanies(params.clientId, searchParams);
+      await this.orchestrator.searchCompanies(params.clientId, searchParams, {
+        ...(params.providerOrder?.length && {
+          providerOverride: params.providerOrder,
+          maxProviders: params.providerOrder.length,
+        }),
+      });
 
     let companies = (discovered ?? []).filter(c => !isBlockedDomain(c.domain) && !isBlockedCompanyName(c.name));
     const blockedCount = (discovered?.length ?? 0) - companies.length;
@@ -319,6 +328,7 @@ export class CompanyDiscoveryService {
         providersUsed,
         totalCost,
         warnings,
+        newCompanyIds: [],
       };
     }
 
@@ -444,9 +454,11 @@ export class CompanyDiscoveryService {
     }
 
     // 8. Upsert discovered companies into DB (now with enriched data)
+    const newCompanyIds: string[] = [];
     let upserted = 0;
     for (const company of newCompanies) {
-      await this.upsertDiscoveredCompany(params.clientId, company);
+      const { id: companyId } = await this.upsertDiscoveredCompany(params.clientId, company);
+      newCompanyIds.push(companyId);
       upserted++;
 
       if (params.jobId && upserted % 10 === 0) {
@@ -534,6 +546,7 @@ export class CompanyDiscoveryService {
       providersUsed,
       totalCost,
       warnings: warnings.length > 0 ? warnings : undefined,
+      newCompanyIds,
     };
   }
 

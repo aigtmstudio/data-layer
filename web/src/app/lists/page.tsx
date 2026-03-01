@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAppStore } from '@/lib/store';
-import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus, useDeleteList } from '@/lib/hooks/use-lists';
+import { useLists, useCreateList, useBuildList, useRefreshList, useBuildStatus, useDeleteList, useAvailableProviders } from '@/lib/hooks/use-lists';
 import { useIcps } from '@/lib/hooks/use-icps';
 import { useTriggerExport } from '@/lib/hooks/use-exports';
 import { DataTable } from '@/components/shared/data-table';
@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { DialogDescription } from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
@@ -50,12 +52,17 @@ export default function ListsPage() {
   const triggerExport = useTriggerExport();
   const deleteList = useDeleteList();
 
+  const { data: availableProviders } = useAvailableProviders();
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [newName, setNewName] = useState('');
   const [newIcpId, setNewIcpId] = useState('');
   const [buildingListId, setBuildingListId] = useState<string | null>(null);
   const { data: buildJob } = useBuildStatus(buildingListId);
+  const [buildOptionsTarget, setBuildOptionsTarget] = useState<string | null>(null);
+  const [buildLimit, setBuildLimit] = useState('100');
+  const [skipExistingDb, setSkipExistingDb] = useState(false);
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
 
   const handleCreate = async () => {
     if (!newName.trim() || !selectedClientId || !newIcpId) return;
@@ -75,9 +82,24 @@ export default function ListsPage() {
     }
   };
 
-  const handleBuild = async (id: string) => {
+  const handleBuild = (id: string) => {
+    setBuildOptionsTarget(id);
+  };
+
+  const handleBuildSubmit = async () => {
+    if (!buildOptionsTarget) return;
+    const id = buildOptionsTarget;
+    setBuildOptionsTarget(null);
+    const limitNum = parseInt(buildLimit, 10);
     try {
-      await buildList.mutateAsync(id);
+      await buildList.mutateAsync({
+        id,
+        options: {
+          limit: isNaN(limitNum) ? undefined : limitNum,
+          skipExistingDb: skipExistingDb || undefined,
+          providerOrder: selectedProviders.length > 0 ? selectedProviders : undefined,
+        },
+      });
       setBuildingListId(id);
       toast.success('Discovering companies from providers...');
     } catch {
@@ -247,6 +269,81 @@ export default function ListsPage() {
       ) : (
         <DataTable columns={columns} data={lists} />
       )}
+
+      {/* Build Options Dialog */}
+      <Dialog open={!!buildOptionsTarget} onOpenChange={(open) => !open && setBuildOptionsTarget(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Build List</DialogTitle>
+            <DialogDescription>Configure how companies are discovered and added to this list.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="build-limit-ov">Target companies to discover</Label>
+              <Input
+                id="build-limit-ov"
+                type="number"
+                min={1}
+                max={1000}
+                value={buildLimit}
+                onChange={e => setBuildLimit(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">How many companies to discover from external providers (default: 100).</p>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <Label htmlFor="skip-existing-ov">Only use newly discovered companies</Label>
+                <p className="text-xs text-muted-foreground mt-0.5">Off: also score companies already in your database. On: only add companies found in this run.</p>
+              </div>
+              <Switch id="skip-existing-ov" checked={skipExistingDb} onCheckedChange={setSkipExistingDb} />
+            </div>
+            {availableProviders && availableProviders.length > 0 && (
+              <div className="space-y-2">
+                <Label>Providers to use</Label>
+                <p className="text-xs text-muted-foreground">Providers are tried in this order. Uncheck to skip a provider.</p>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                  {availableProviders.map(provider => {
+                    const effectiveList = selectedProviders.length > 0 ? selectedProviders : availableProviders;
+                    const isChecked = effectiveList.includes(provider);
+                    return (
+                      <div key={provider} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          id={`ov-provider-${provider}`}
+                          checked={isChecked}
+                          onChange={e => {
+                            const current = selectedProviders.length > 0 ? selectedProviders : [...availableProviders];
+                            if (e.target.checked) {
+                              const ordered = availableProviders.filter(p => [...current, provider].includes(p));
+                              setSelectedProviders(ordered);
+                            } else {
+                              setSelectedProviders(current.filter(p => p !== provider));
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-input"
+                        />
+                        <label htmlFor={`ov-provider-${provider}`} className="text-sm cursor-pointer font-mono">{provider}</label>
+                      </div>
+                    );
+                  })}
+                </div>
+                {selectedProviders.length > 0 && selectedProviders.length < availableProviders.length && (
+                  <button type="button" className="text-xs text-muted-foreground underline underline-offset-2" onClick={() => setSelectedProviders([])}>
+                    Reset to all providers
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setBuildOptionsTarget(null)}>Cancel</Button>
+            <Button onClick={handleBuildSubmit}>
+              <Play className="mr-2 h-4 w-4" />
+              Build
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <DialogContent className="sm:max-w-md">

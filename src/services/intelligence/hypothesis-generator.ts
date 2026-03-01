@@ -41,46 +41,51 @@ type ValidCategory = typeof ALL_CATEGORIES[number];
 
 // -- Prompts --
 
-export const MARKET_HYPOTHESIS_PROMPT = `You are a B2B market signal strategist. Generate testable hypotheses about MACRO-LEVEL market events that indicate increased buying urgency across an entire market segment — NOT about individual companies.
+export const MARKET_HYPOTHESIS_PROMPT = `You are a B2B market signal strategist. Generate a small number of simple, broad, testable hypotheses about MACRO-LEVEL market conditions that indicate increased buying urgency across the client's entire target market.
 
-Market signals are external events that affect many companies simultaneously:
-- Regulatory changes (new legislation, compliance deadlines, policy shifts)
-- Industry trends (market consolidation, emerging categories, sector growth/decline)
-- Economic shifts (interest rate changes, funding climate, budget cycles)
-- Competitive landscape changes (major acquisitions, new market entrants, category creation)
+## What makes a good hypothesis
 
-DO NOT include company-specific signals like "Company raises funding" or "Company is hiring engineers." Those belong at the company level.
+- BROAD: Applies to a large portion of the ICP, not a niche subset
+- SIMPLE: One clear causal link — "X is happening, so companies need Y"
+- DETECTABLE: Can be confirmed or denied by searching recent news right now
+- HIGH SIGNAL: If the hypothesis is true, most companies in the ICP segment genuinely need the client's product
 
-## Detection Capabilities
+Bad example (too narrow): "UK SaaS companies with >200 employees migrating from Salesforce to HubSpot are evaluating GTM consultants"
+Good example (broad): "UK SaaS scale-ups are under pressure to improve revenue efficiency as the VC funding climate tightens"
 
-Market signals are detected via:
-- news_search: Industry news, regulatory announcements, analyst reports via web search
-- webhook_external_feed: Regulatory feeds, earnings calendars, industry newsletters
-- website_content_analysis: Industry association pages, government regulatory sites
+## Categories
+
+- regulatory: New legislation, compliance deadlines, policy shifts that force action
+- economic: Funding climate, budget cycles, macro pressure affecting spend
+- industry: Structural shifts — consolidation, new categories, platform changes
+- competitive: Category-level disruption creating urgency to act
+
+## Detection (news_search only — keep it simple)
+
+All hypotheses should use news_search. We search recent news to find evidence the macro condition is real.
 
 ## Rules
 
-1. Generate exactly 4-6 hypotheses
-2. Each hypothesis must describe a macro event affecting a SEGMENT, not a single company
-3. Every hypothesis must include which ICP segments it affects
-4. Strongly prefer auto-detectable methods (news_search) over webhook_external_feed
-5. Maximum 1 hypothesis may use webhook_external_feed
-6. Be specific to the client's industry and target market — no generic B2B platitudes
+1. Generate exactly 3-5 hypotheses — fewer, broader is better than many narrow ones
+2. Each hypothesis must be a macro condition affecting MOST companies in the ICP, not a subset
+3. Write them as present-tense market conditions, not predictions
+4. No generic platitudes — ground each in the client's specific market and buyer
+5. Prefer the 2-3 signals with the STRONGEST buying intent connection over completeness
 
 For each hypothesis, provide:
-- hypothesis: Clear statement about a detectable macro event and why it creates buying urgency
+- hypothesis: 1-2 sentence statement of the macro condition and why it creates buying urgency
 - signalCategory: One of "regulatory", "economic", "industry", "competitive"
-- detectionMethod: One of "news_search", "webhook_external_feed", "website_content_analysis"
-- affectedSegments: Which ICP segments this affects
-- priority: 1-10 (1 = highest)
-- reasoning: One sentence on why this macro event creates buying intent across the segment
+- detectionMethod: "news_search"
+- affectedSegments: Which ICP segments this affects (keep broad)
+- priority: 1-10 (1 = highest, max 3 hypotheses at priority 1-3)
+- reasoning: One sentence on the buying intent mechanism
 
 Return ONLY a valid JSON array:
 [
   {
     "hypothesis": "...",
     "signalCategory": "regulatory|economic|industry|competitive",
-    "detectionMethod": "news_search|webhook_external_feed|website_content_analysis",
+    "detectionMethod": "news_search",
     "affectedSegments": ["..."],
     "priority": 1,
     "reasoning": "..."
@@ -649,5 +654,18 @@ export class HypothesisGenerator {
       .update(schema.signalHypotheses)
       .set({ status, updatedAt: new Date() })
       .where(inArray(schema.signalHypotheses.id, ids));
+  }
+
+  async clearHypotheses(clientId: string, signalLevel?: 'market' | 'company' | 'persona') {
+    const db = getDb();
+    const conditions = [eq(schema.signalHypotheses.clientId, clientId)];
+    if (signalLevel) {
+      conditions.push(eq(schema.signalHypotheses.signalLevel, signalLevel));
+    }
+    const result = await db
+      .delete(schema.signalHypotheses)
+      .where(and(...conditions))
+      .returning({ id: schema.signalHypotheses.id });
+    return result.length;
   }
 }

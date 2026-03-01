@@ -163,6 +163,18 @@ export const hypothesisRoutes: FastifyPluginAsync<{ container: ServiceContainer 
     return { data: updated };
   });
 
+  // DELETE /api/hypotheses/clear?clientId=...&signalLevel=...
+  app.delete<{
+    Querystring: { clientId?: string; signalLevel?: string };
+  }>('/clear', async (request, reply) => {
+    if (!request.query.clientId) {
+      return reply.status(400).send({ error: 'clientId is required' });
+    }
+    const signalLevel = request.query.signalLevel as typeof signalLevels[number] | undefined;
+    const deleted = await hypothesisGenerator.clearHypotheses(request.query.clientId, signalLevel);
+    return { data: { deleted } };
+  });
+
   // DELETE /api/hypotheses/:id
   app.delete<{ Params: { id: string } }>('/:id', async (request) => {
     await hypothesisGenerator.deleteHypothesis(request.params.id);

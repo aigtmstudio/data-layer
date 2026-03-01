@@ -5,6 +5,8 @@ export interface TavilySearchResult {
   score: number;
   raw_content?: string;
   favicon?: string;
+  /** Published date of the article (returned by Tavily for topic='news') */
+  published_date?: string;
 }
 
 export interface TavilySearchResponse {

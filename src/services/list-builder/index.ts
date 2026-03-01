@@ -73,6 +73,8 @@ export class ListBuilder {
     icpId: string;
     personaId?: string;
     limit?: number;
+    /** If set, only include companies with these IDs (used to skip pre-existing DB companies) */
+    allowedCompanyIds?: Set<string>;
   }): Promise<{ companiesAdded: number; contactsAdded: number }> {
     const db = getDb();
 
@@ -106,6 +108,18 @@ export class ListBuilder {
       );
     }
 
+    // If allowedCompanyIds is provided, restrict to only those (e.g. skip pre-existing DB companies)
+    const allowedFiltered = params.allowedCompanyIds
+      ? validCompanies.filter(c => params.allowedCompanyIds!.has(c.id))
+      : validCompanies;
+
+    if (params.allowedCompanyIds && allowedFiltered.length < validCompanies.length) {
+      logger.info(
+        { allowed: allowedFiltered.length, skipped: validCompanies.length - allowedFiltered.length },
+        'Skipped pre-existing companies (skipExistingDb=true)',
+      );
+    }
+
     // Skip companies already in the list (prevents duplicates on re-build)
     const existingMembers = await db
       .select({ companyId: schema.listMembers.companyId })
@@ -116,8 +130,8 @@ export class ListBuilder {
       ));
     const existingCompanyIds = new Set(existingMembers.map(m => m.companyId).filter(Boolean));
     const candidates = existingCompanyIds.size > 0
-      ? validCompanies.filter(c => !existingCompanyIds.has(c.id))
-      : validCompanies;
+      ? allowedFiltered.filter(c => !existingCompanyIds.has(c.id))
+      : allowedFiltered;
 
     if (existingCompanyIds.size > 0) {
       logger.info(
@@ -447,6 +461,10 @@ export class ListBuilder {
     personaId?: string;
     limit?: number;
     jobId: string;
+    /** If true, only add companies discovered in this run (not pre-existing DB companies) */
+    skipExistingDb?: boolean;
+    /** Override provider search order */
+    providerOrder?: string[];
   }): Promise<{ companiesAdded: number; contactsAdded: number; discovery: import('../company-discovery/index.js').DiscoveryResult }> {
     const db = getDb();
 
@@ -463,6 +481,7 @@ export class ListBuilder {
       personaId: params.personaId,
       limit: params.limit ?? 100,
       jobId: params.jobId,
+      providerOrder: params.providerOrder,
     });
 
     logger.info(
@@ -471,12 +490,17 @@ export class ListBuilder {
     );
 
     // Step 2: Build list from the now-populated DB
+    const allowedCompanyIds = params.skipExistingDb && discovery.newCompanyIds.length > 0
+      ? new Set(discovery.newCompanyIds)
+      : undefined;
+
     const result = await this.buildList({
       clientId: params.clientId,
       listId: params.listId,
       icpId: params.icpId,
       personaId: params.personaId,
       limit: params.limit,
+      allowedCompanyIds,
     });
 
     // Step 3: Update job as completed

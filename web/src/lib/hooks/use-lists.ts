@@ -58,12 +58,21 @@ export function useCreateList() {
 export function useBuildList() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: listsApi.buildList,
-    onSuccess: (_, listId) => {
+    mutationFn: ({ id, options }: { id: string; options?: listsApi.BuildOptions }) =>
+      listsApi.buildList(id, options),
+    onSuccess: (_, { id }) => {
       qc.invalidateQueries({ queryKey: ['lists'] });
       qc.invalidateQueries({ queryKey: ['jobs'] });
-      qc.invalidateQueries({ queryKey: listKeys.buildStatus(listId) });
+      qc.invalidateQueries({ queryKey: listKeys.buildStatus(id) });
     },
+  });
+}
+
+export function useAvailableProviders() {
+  return useQuery({
+    queryKey: ['lists', 'providers'],
+    queryFn: listsApi.getAvailableProviders,
+    staleTime: 5 * 60 * 1000, // providers don't change often
   });
 }
 

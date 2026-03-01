@@ -52,27 +52,33 @@ registerPrompt({
   defaultContent: CLASSIFICATION_PROMPT,
 });
 
-export const PROMOTION_PROMPT = `You are a market analyst evaluating whether a market event affects specific companies.
+export const PROMOTION_PROMPT = `You are a strict market analyst evaluating whether a market event DIRECTLY and MATERIALLY affects specific companies.
 
 A market signal has been detected. For each company below, evaluate whether this signal meaningfully affects their business using their PESTLE profile.
 
-## Evaluation Rules
+## Evaluation Rules — BE CONSERVATIVE
 
-- A company IS affected if their PESTLE profile shows DIRECT exposure to the forces described in the signal.
-- A company is NOT affected if the relevant PESTLE dimension shows "No evidence" or no clear connection.
-- Only mark affected=true when there is SPECIFIC evidence in the company's profile — not generic industry overlap.
-- Confidence should reflect how directly the signal connects to the company's specific situation.
+- DEFAULT to NOT affected. Only mark affected=true when the evidence is unambiguous.
+- A company IS affected only if their PESTLE profile shows DIRECT, SPECIFIC exposure to the forces in the signal — not general industry membership.
+- Generic overlap ("they're in tech and this is a tech trend") is NOT sufficient. You need concrete evidence from the profile.
+- "No evidence", vague language, or indirect connection → affected=false.
+- Confidence below 0.8 means you're not sure → affected=false.
+- Expect that most companies (60-80%) will NOT be affected by any given signal.
 
 ## Signal-to-PESTLE Mapping
 
-Use this mapping to focus your evaluation on the most relevant PESTLE dimensions:
-- regulatory signal → check Legal, Political dimensions
-- economic signal → check Economic dimension
-- industry signal → check Social, Technological dimensions
-- competitive signal → check Technological, Economic dimensions
+Focus your evaluation on the most relevant PESTLE dimensions:
+- regulatory signal → Legal, Political
+- economic signal → Economic
+- industry signal → Social, Technological
+- competitive signal → Technological, Economic
 
-Return ONLY a valid JSON array of objects for companies where affected=true:
-[{ "companyIndex": number, "affected": true, "confidence": number (0.0-1.0), "pestleDimension": "Political"|"Economic"|"Social"|"Technological"|"Legal"|"Environmental", "reasoning": "1 sentence referencing specific PESTLE evidence from the profile" }]
+## Calibration
+
+Ask yourself: "Would this signal cause THIS specific company's buyer to urgently seek out the client's product RIGHT NOW?" If you cannot answer yes confidently from the profile text, mark affected=false.
+
+Return ONLY a valid JSON array of objects for companies where affected=true AND confidence >= 0.8:
+[{ "companyIndex": number, "affected": true, "confidence": number (0.8-1.0), "pestleDimension": "Political"|"Economic"|"Social"|"Technological"|"Legal"|"Environmental", "reasoning": "1 sentence citing the SPECIFIC text from the company profile that confirms direct exposure" }]
 
 If NO companies are affected, return an empty array: []`;
 
@@ -254,7 +260,7 @@ export class MarketSignalProcessor {
               adjustedRelevance,
             }, 'Timeliness-adjusted relevance');
 
-            if (adjustedRelevance >= 0.7 && classification.affectedSegments?.length > 0) {
+            if (adjustedRelevance >= 0.75 && classification.affectedSegments?.length > 0) {
               await this.promoteCompanies(
                 cId, classification.affectedSegments, signal.id,
                 matchedHypothesis?.id, classification.relevanceScore,
@@ -408,7 +414,7 @@ export class MarketSignalProcessor {
         if (!Array.isArray(evaluations)) continue;
 
         for (const evaluation of evaluations) {
-          if (!evaluation.affected || evaluation.confidence < 0.75) continue;
+          if (!evaluation.affected || evaluation.confidence < 0.8) continue;
           if (evaluation.companyIndex < 0 || evaluation.companyIndex >= batch.length) continue;
 
           promotedCompanies.push({

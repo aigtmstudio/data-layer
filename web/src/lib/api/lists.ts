@@ -24,8 +24,19 @@ export async function createList(data: {
   return res.data;
 }
 
-export async function buildList(id: string): Promise<{ jobId: string }> {
-  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/build`);
+export interface BuildOptions {
+  limit?: number;
+  skipExistingDb?: boolean;
+  providerOrder?: string[];
+}
+
+export async function buildList(id: string, options?: BuildOptions): Promise<{ jobId: string }> {
+  const res = await apiClient.post<ApiResponse<{ jobId: string }>>(`/api/lists/${id}/build`, options ?? {});
+  return res.data;
+}
+
+export async function getAvailableProviders(): Promise<string[]> {
+  const res = await apiClient.get<ApiResponse<string[]>>('/api/lists/providers');
   return res.data;
 }
 

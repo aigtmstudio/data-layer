@@ -68,6 +68,11 @@ export class SourceOrchestrator {
     return Array.from(this.providers.keys());
   }
 
+  /** Get registered provider names that support a given capability, in priority order */
+  getProvidersByCapability(capability: ProviderCapability): string[] {
+    return this.getProvidersWithCapability(capability).map(p => p.name);
+  }
+
   async enrichCompany(
     clientId: string,
     params: { domain?: string; name?: string },

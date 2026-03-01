@@ -100,6 +100,11 @@ function TopicCard({ topic }: { topic: TrendingTopic }) {
               <span className="text-xs text-muted-foreground">
                 ~{Math.round(topic.recencyDays ?? 0)}d avg age
               </span>
+              {topic.hasSocialSignals && (
+                <Badge variant="secondary" className="text-xs bg-blue-50 text-blue-700 border-blue-200">
+                  Social buzz
+                </Badge>
+              )}
             </div>
           </div>
           <div className="text-right shrink-0">

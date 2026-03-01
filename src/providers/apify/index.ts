@@ -8,7 +8,19 @@ import type {
   UnifiedContact,
   ProviderResponse,
 } from '../types.js';
-import { mapLinkedInCompany, mapLinkedInProfile } from './mappers.js';
+import {
+  mapLinkedInCompany,
+  mapLinkedInProfile,
+  mapInstagramPost,
+  mapTweet,
+  mapYouTubeVideo,
+  mapRedditPost,
+  mapLinkedInPost,
+  mapGooglePlaceToCompany,
+  mapOpenTableListing,
+  mapUberEatsListing,
+  mapJustEatListing,
+} from './mappers.js';
 import { ACTORS } from './actors.js';
 import type {
   ApifyRunResponse,
@@ -16,7 +28,20 @@ import type {
   ApifyRun,
   LinkedInCompanyResult,
   LinkedInProfileResult,
+  SocialPost,
+  SocialPlatform,
+  InstagramPost,
+  Tweet,
+  YouTubeVideo,
+  RedditPost,
+  LinkedInPost,
+  GooglePlaceResult,
+  OpenTableListing,
+  UberEatsListing,
+  JustEatListing,
+  ListingPlatform,
 } from './types.js';
+import type { UnifiedCompany } from '../types.js';
 
 const POLL_TIMEOUT_MS = 5 * 60 * 1000;
 const WAIT_FOR_FINISH = '60';

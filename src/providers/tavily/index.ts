@@ -160,6 +160,8 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
   async searchNews(params: {
     query: string;
     maxResults?: number;
+    /** Restrict results to the last N days (only valid with topic='news') */
+    days?: number;
   }): Promise<TavilySearchResponse> {
     const body: Record<string, unknown> = {
       query: params.query,
@@ -168,6 +170,9 @@ export class TavilyProvider extends BaseProvider implements DataProvider {
       topic: 'news',
       include_raw_content: false,
     };
+    if (params.days) {
+      body.days = params.days;
+    }
     return this.request<TavilySearchResponse>('post', '/search', { body });
   }
 }

@@ -72,3 +72,12 @@ export function useDeleteHypothesis() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['hypotheses'] }),
   });
 }
+
+export function useClearHypotheses() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ clientId, signalLevel }: { clientId: string; signalLevel?: SignalLevel }) =>
+      hypothesesApi.clearHypotheses(clientId, signalLevel),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['hypotheses'] }),
+  });
+}

@@ -6,7 +6,7 @@ import { personas } from './personas.js';
 import { companies } from './companies.js';
 import { contacts } from './contacts.js';
 import { strategies } from './intelligence.js';
-import { listTypeEnum } from './enums.js';
+import { listTypeEnum, pipelineStageEnum } from './enums.js';
 
 export interface ListFilterSnapshot {
   icpFilters: Record<string, unknown>;
@@ -56,6 +56,8 @@ export const listMembers = pgTable('list_members', {
   intelligenceScore: numeric('intelligence_score', { precision: 3, scale: 2 }),
   personaScore: numeric('persona_score', { precision: 3, scale: 2 }),
   addedReason: text('added_reason'),
+
+  pipelineStage: pipelineStageEnum('pipeline_stage').notNull().default('tam'),
 
   engagementBrief: jsonb('engagement_brief'),
   briefGeneratedAt: timestamp('brief_generated_at', { withTimezone: true }),

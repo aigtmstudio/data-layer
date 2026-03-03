@@ -1,6 +1,18 @@
 import { apiClient } from '../api-client';
 import type { PromptConfig, ApiResponse } from '../types';
 
+export interface DataSourceInfo {
+  name: string;
+  displayName: string;
+  description: string;
+  category: string;
+  capabilities: string[];
+  priority: number | null;
+  required: boolean;
+  active: boolean;
+  envVars: string[];
+}
+
 export async function getPromptConfigs(): Promise<PromptConfig[]> {
   const res = await apiClient.get<ApiResponse<PromptConfig[]>>('/api/settings/prompts');
   return res.data;
@@ -13,5 +25,10 @@ export async function updatePromptConfig(key: string, content: string): Promise<
 
 export async function resetPromptConfig(key: string): Promise<PromptConfig> {
   const res = await apiClient.delete<ApiResponse<PromptConfig>>(`/api/settings/prompts/${encodeURIComponent(key)}`);
+  return res.data;
+}
+
+export async function getDataSources(): Promise<DataSourceInfo[]> {
+  const res = await apiClient.get<ApiResponse<DataSourceInfo[]>>('/api/settings/data-sources');
   return res.data;
 }

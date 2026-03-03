@@ -19,6 +19,10 @@ import { personaV2Routes } from './routes/personas-v2.js';
 import { settingsRoutes } from './routes/settings.js';
 import { llmUsageRoutes } from './routes/llm-usage.js';
 import { marketBuzzRoutes } from './routes/market-buzz.js';
+import { influencerRoutes } from './routes/influencers.js';
+import { competitorMonitoringRoutes } from './routes/competitor-monitoring.js';
+import { discoveryRoutes } from './routes/discovery.js';
+import { marketBuilderRoutes } from './routes/market-builder.js';
 import type { ServiceContainer } from '../index.js';
 
 export async function buildApp(apiKey: string, container: ServiceContainer) {
@@ -49,6 +53,10 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   await app.register(settingsRoutes, { prefix: '/api/settings', container });
   await app.register(llmUsageRoutes, { prefix: '/api/llm-usage' });
   await app.register(marketBuzzRoutes, { prefix: '/api/market-buzz', container });
+  await app.register(influencerRoutes, { prefix: '/api/influencers', container });
+  await app.register(competitorMonitoringRoutes, { prefix: '/api/competitors', container });
+  await app.register(discoveryRoutes, { prefix: '/api/discovery', container });
+  await app.register(marketBuilderRoutes, { prefix: '/api/market-builder', container });
 
   // Health check
   app.get('/health', async () => ({

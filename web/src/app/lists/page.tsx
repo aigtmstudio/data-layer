@@ -35,11 +35,13 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatDate, formatRelativeTime, formatNumber } from '@/lib/utils';
-import { Plus, List, MoreHorizontal, Play, RefreshCw, Download, Loader2, Trash2 } from 'lucide-react';
+import { Plus, List, MoreHorizontal, Play, RefreshCw, Download, Loader2, Trash2, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { List as ListType } from '@/lib/types';
+import * as marketBuilderApi from '@/lib/api/market-builder';
+import type { MarketBuilderPlan, SavedPlan as MarketBuilderSavedPlan } from '@/lib/api/market-builder';
 
 export default function ListsPage() {
   const qc = useQueryClient();
@@ -63,6 +65,15 @@ export default function ListsPage() {
   const [buildLimit, setBuildLimit] = useState('100');
   const [skipExistingDb, setSkipExistingDb] = useState(false);
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
+
+  // AI Market Builder state
+  const [aiPlan, setAiPlan] = useState<MarketBuilderPlan | null>(null);
+  const [aiSavedPlan, setAiSavedPlan] = useState<MarketBuilderSavedPlan | null>(null);
+  const [aiPlanLoading, setAiPlanLoading] = useState(false);
+  const [aiPlanRefining, setAiPlanRefining] = useState(false);
+  const [aiPlanApproving, setAiPlanApproving] = useState(false);
+  const [aiPlanFeedback, setAiPlanFeedback] = useState('');
+  const [aiPlanOpen, setAiPlanOpen] = useState(false);
 
   const handleCreate = async () => {
     if (!newName.trim() || !selectedClientId || !newIcpId) return;
@@ -122,6 +133,23 @@ export default function ListsPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- qc is stable, selectedClientId captured in closure
   }, [buildJob?.status, buildingListId]);
+
+  // Load existing approved plan when build dialog opens
+  useEffect(() => {
+    if (!buildOptionsTarget) {
+      setAiPlan(null);
+      setAiSavedPlan(null);
+      setAiPlanOpen(false);
+      setAiPlanFeedback('');
+      return;
+    }
+    const list = lists?.find(l => l.id === buildOptionsTarget);
+    if (!list?.clientId) return;
+    marketBuilderApi.getApprovedPlan(list.clientId).then(plan => {
+      if (plan) { setAiSavedPlan(plan); setAiPlan(plan.plan); setAiPlanOpen(true); }
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buildOptionsTarget]);
 
   const handleRefresh = async (id: string) => {
     try {
@@ -272,12 +300,12 @@ export default function ListsPage() {
 
       {/* Build Options Dialog */}
       <Dialog open={!!buildOptionsTarget} onOpenChange={(open) => !open && setBuildOptionsTarget(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>Build List</DialogTitle>
             <DialogDescription>Configure how companies are discovered and added to this list.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-5 py-2">
+          <div className="space-y-5 py-2 overflow-y-auto flex-1 pr-1">
             <div className="space-y-1.5">
               <Label htmlFor="build-limit-ov">Target companies to discover</Label>
               <Input
@@ -334,8 +362,149 @@ export default function ListsPage() {
                 )}
               </div>
             )}
+
+            {/* AI Market Builder Strategy */}
+            <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                  <span className="text-sm font-medium">AI Market Builder</span>
+                  {aiSavedPlan && (
+                    <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">Plan saved</span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={aiPlanLoading}
+                  onClick={async () => {
+                    const list = lists?.find(l => l.id === buildOptionsTarget);
+                    const clientId = list?.clientId;
+                    if (!clientId) return;
+                    setAiPlanLoading(true);
+                    setAiPlanOpen(true);
+                    try {
+                      const plan = await marketBuilderApi.generateMarketPlan(clientId);
+                      setAiPlan(plan);
+                      setAiSavedPlan(null);
+                      setAiPlanFeedback('');
+                    } catch {
+                      toast.error('Failed to generate plan');
+                    } finally {
+                      setAiPlanLoading(false);
+                    }
+                  }}
+                >
+                  {aiPlanLoading
+                    ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Thinking…</>
+                    : aiPlan
+                      ? <><Sparkles className="mr-1.5 h-3 w-3" />Regenerate</>
+                      : <><Sparkles className="mr-1.5 h-3 w-3" />Generate Plan</>
+                  }
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Opus analyses your ICP and selects the right discovery sources automatically. Use this <em>instead of</em> Manual Discovery below.
+              </p>
+
+              {aiPlanOpen && aiPlan && !aiPlanLoading && (
+                <div className="space-y-3 pt-1">
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <span className="inline-flex items-center rounded-full bg-purple-100 text-purple-800 text-xs font-medium px-2 py-0.5">{aiPlan.vertical}</span>
+                    <span className="text-xs text-muted-foreground">{aiPlan.expectedOutcome}</span>
+                  </div>
+                  <div className="text-xs text-foreground/80 space-y-1.5 leading-relaxed">
+                    {aiPlan.reasoning.split('\n\n').filter(Boolean).map((para, i) => (
+                      <p key={i}>{para.replace(/^#+\s*/, '')}</p>
+                    ))}
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Providers</p>
+                    <div className="space-y-1">
+                      {aiPlan.providers.map((task, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span className={`rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${task.priority === 'primary' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                            {task.provider}
+                          </span>
+                          <span className="text-muted-foreground">{task.rationale}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      className="w-full text-xs border border-input rounded px-2.5 py-1.5 bg-background placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Tell the AI what to change… (e.g. remove reviews, add LinkedIn)"
+                      value={aiPlanFeedback}
+                      onChange={e => setAiPlanFeedback(e.target.value)}
+                      onKeyDown={async e => {
+                        if (e.key !== 'Enter' || !aiPlanFeedback.trim() || aiPlanRefining) return;
+                        const list = lists?.find(l => l.id === buildOptionsTarget);
+                        const clientId = list?.clientId;
+                        if (!clientId) return;
+                        setAiPlanRefining(true);
+                        try {
+                          const refined = await marketBuilderApi.refineMarketPlan(clientId, aiPlan, aiPlanFeedback);
+                          setAiPlan(refined);
+                          setAiPlanFeedback('');
+                        } catch { toast.error('Failed to refine plan'); }
+                        finally { setAiPlanRefining(false); }
+                      }}
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        disabled={!aiPlanFeedback.trim() || aiPlanRefining}
+                        onClick={async () => {
+                          const list = lists?.find(l => l.id === buildOptionsTarget);
+                          const clientId = list?.clientId;
+                          if (!clientId) return;
+                          setAiPlanRefining(true);
+                          try {
+                            const refined = await marketBuilderApi.refineMarketPlan(clientId, aiPlan, aiPlanFeedback);
+                            setAiPlan(refined);
+                            setAiPlanFeedback('');
+                          } catch { toast.error('Failed to refine plan'); }
+                          finally { setAiPlanRefining(false); }
+                        }}
+                      >
+                        {aiPlanRefining ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Refining…</> : 'Refine'}
+                      </Button>
+                      <Button
+                        type="button" size="sm"
+                        disabled={aiPlanApproving}
+                        className="bg-purple-600 hover:bg-purple-700 text-white"
+                        onClick={async () => {
+                          const list = lists?.find(l => l.id === buildOptionsTarget);
+                          const clientId = list?.clientId;
+                          if (!clientId) return;
+                          setAiPlanApproving(true);
+                          try {
+                            const saved = await marketBuilderApi.approveMarketPlan(clientId, aiPlan);
+                            setAiSavedPlan(saved);
+                            await marketBuilderApi.executeMarketPlan(saved.id, clientId, buildOptionsTarget ?? undefined);
+                            toast.success('AI market build started in background');
+                            setBuildOptionsTarget(null);
+                          } catch { toast.error('Failed to approve plan'); }
+                          finally { setAiPlanApproving(false); }
+                        }}
+                      >
+                        {aiPlanApproving
+                          ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Saving…</>
+                          : <><Sparkles className="mr-1.5 h-3.5 w-3.5" />Approve & Execute</>}
+                      </Button>
+                    </div>
+                    {aiSavedPlan && (
+                      <p className="text-xs text-green-700 text-center">Plan v{aiPlan.version} saved — future builds will use this as a reference</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
+          <div className="flex-shrink-0 pt-2 flex justify-end gap-2">
             <Button variant="outline" onClick={() => setBuildOptionsTarget(null)}>Cancel</Button>
             <Button onClick={handleBuildSubmit}>
               <Play className="mr-2 h-4 w-4" />

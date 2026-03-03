@@ -24,6 +24,8 @@ const envSchema = z.object({
   SCRAPEGRAPH_API_KEY: z.string().optional(),
   JINA_API_KEY: z.string().optional(),
 
+  UPTIMEROBOT_API_KEY: z.string().optional(),
+
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
 
@@ -58,6 +60,7 @@ export const config = {
   firecrawlApiKey: parsed.data.FIRECRAWL_API_KEY,
   scrapegraphApiKey: parsed.data.SCRAPEGRAPH_API_KEY,
   jinaApiKey: parsed.data.JINA_API_KEY,
+  uptimerobotApiKey: parsed.data.UPTIMEROBOT_API_KEY,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

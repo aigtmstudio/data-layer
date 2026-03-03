@@ -15,3 +15,6 @@ export * from './contact-signals.js';
 export * from './prompt-configs.js';
 export * from './llm-usage.js';
 export * from './market-buzz.js';
+export * from './influencers.js';
+export * from './competitor-monitoring.js';
+export * from './market-builder.js';

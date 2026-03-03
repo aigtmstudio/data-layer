@@ -50,6 +50,7 @@ export const icps = pgTable('icps', {
 
   naturalLanguageInput: text('natural_language_input'),
   filters: jsonb('filters').$type<IcpFilters>().notNull().default({}),
+  socialKeywords: jsonb('social_keywords').$type<string[]>().default([]),
 
   sources: jsonb('sources').$type<IcpSourceRecord[]>().default([]),
   providerHints: jsonb('provider_hints').$type<ProviderSearchHints>(),

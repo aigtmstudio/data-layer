@@ -9,7 +9,7 @@ import { withLlmContext } from '../../lib/llm-tracker.js';
 const signalLevels = ['market', 'company', 'persona'] as const;
 const signalCategories = [
   // Market
-  'regulatory', 'economic', 'industry', 'competitive',
+  'regulatory', 'economic', 'industry', 'competitive', 'social',
   // Company
   'funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch',
   // Persona

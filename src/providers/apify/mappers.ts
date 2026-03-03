@@ -80,46 +80,52 @@ export function mapTweet(raw: Tweet): SocialPost {
   return {
     platform: 'twitter',
     id: raw.id ?? '',
-    url: raw.url ?? '',
-    text: raw.full_text ?? raw.text ?? '',
-    authorHandle: raw.author?.userName,
-    authorName: raw.author?.name,
-    publishedAt: raw.created_at,
-    likesCount: raw.likeCount,
-    commentsCount: raw.replyCount,
-    sharesCount: raw.retweetCount,
+    url: raw.url ?? raw.tweetUrl ?? '',
+    text: raw.text ?? raw.full_text ?? '',
+    authorHandle: raw.author?.username ?? raw.user?.screen_name,
+    authorName: raw.author?.name ?? raw.user?.name,
+    publishedAt: raw.createdAt ?? raw.created_at,
+    likesCount: raw.likeCount ?? raw.favorite_count,
+    commentsCount: raw.replyCount ?? raw.reply_count,
+    sharesCount: raw.retweetCount ?? raw.retweet_count,
     viewsCount: raw.viewCount,
     rawData: raw,
   };
 }
 
 export function mapYouTubeVideo(raw: YouTubeVideo): SocialPost {
+  const id = raw.id ?? raw.videoId ?? '';
+  const url = raw.url ?? raw.link ?? (id ? `https://youtube.com/watch?v=${id}` : '');
   return {
     platform: 'youtube',
-    id: raw.id ?? '',
-    url: raw.url ?? '',
-    text: [raw.title, raw.description].filter(Boolean).join('\n\n'),
+    id,
+    url,
+    text: [raw.title, raw.description ?? raw.text].filter(Boolean).join('\n\n'),
     authorHandle: raw.channelUrl,
-    authorName: raw.channelName,
-    publishedAt: raw.date,
-    likesCount: raw.likes,
-    commentsCount: raw.comments,
-    viewsCount: raw.views,
+    authorName: raw.channelName ?? raw.channelTitle ?? raw.author,
+    publishedAt: raw.publishedAt ?? raw.uploadDate ?? raw.date,
+    likesCount: raw.likeCount !== undefined ? Number(raw.likeCount) : (raw.likes !== undefined ? Number(raw.likes) : undefined),
+    commentsCount: raw.commentCount !== undefined ? Number(raw.commentCount) : (raw.comments !== undefined ? Number(raw.comments) : undefined),
+    viewsCount: raw.viewCount !== undefined ? Number(raw.viewCount) : (raw.views !== undefined ? Number(raw.views) : undefined),
     rawData: raw,
   };
 }
 
 export function mapRedditPost(raw: RedditPost): SocialPost {
+  const body = raw.body ?? raw.text ?? raw.selftext ?? '';
+  const publishedAt = raw.createdAt
+    ?? (raw.createdUtc ? new Date(raw.createdUtc * 1000).toISOString() : undefined)
+    ?? (raw.created_utc ? new Date(raw.created_utc * 1000).toISOString() : undefined);
   return {
     platform: 'reddit',
     id: raw.id ?? '',
-    url: raw.url ?? '',
-    text: [raw.title, raw.text ?? raw.selftext].filter(Boolean).join('\n\n'),
-    authorHandle: raw.author,
-    authorName: raw.author,
-    publishedAt: raw.created_utc ? new Date(raw.created_utc * 1000).toISOString() : undefined,
-    likesCount: raw.score,
-    commentsCount: raw.num_comments,
+    url: raw.url ?? raw.postUrl ?? '',
+    text: [raw.title, body].filter(Boolean).join('\n\n'),
+    authorHandle: raw.author ?? raw.username,
+    authorName: raw.author ?? raw.username,
+    publishedAt,
+    likesCount: raw.score ?? raw.upvotes,
+    commentsCount: raw.numberOfComments ?? raw.numComments ?? raw.commentsCount,
     rawData: raw,
   };
 }
@@ -128,14 +134,14 @@ export function mapLinkedInPost(raw: LinkedInPost): SocialPost {
   return {
     platform: 'linkedin',
     id: raw.id ?? '',
-    url: raw.url ?? '',
-    text: raw.text ?? '',
-    authorHandle: raw.authorHandle,
-    authorName: raw.authorName,
-    publishedAt: raw.postedAt,
-    likesCount: raw.likesCount,
-    commentsCount: raw.commentsCount,
-    sharesCount: raw.sharesCount,
+    url: raw.linkedinUrl ?? '',
+    text: raw.content ?? '',
+    authorHandle: raw.author?.universalName,
+    authorName: raw.author?.name,
+    publishedAt: raw.postedAt?.date,
+    likesCount: raw.engagement?.likes,
+    commentsCount: raw.engagement?.comments,
+    sharesCount: raw.engagement?.shares,
     rawData: raw,
   };
 }

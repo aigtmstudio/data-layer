@@ -176,7 +176,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
       // Filter by pipeline stage if provided
       const validStages = ['tam', 'active_segment', 'qualified', 'ready_to_approach', 'in_sequence', 'converted'] as const;
       if (request.query.stage && validStages.includes(request.query.stage as typeof validStages[number])) {
-        conditions.push(eq(schema.companies.pipelineStage, request.query.stage as typeof validStages[number]));
+        conditions.push(eq(schema.listMembers.pipelineStage, request.query.stage as typeof validStages[number]));
       }
 
       const members = await db
@@ -196,7 +196,7 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
           companyIndustry: schema.companies.industry,
           companySource: schema.companies.primarySource,
           companyWebsiteProfile: schema.companies.websiteProfile,
-          pipelineStage: schema.companies.pipelineStage,
+          pipelineStage: schema.listMembers.pipelineStage,
           contactName: schema.contacts.fullName,
           contactTitle: schema.contacts.title,
           contactEmail: schema.contacts.workEmail,
@@ -343,16 +343,16 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
 
     const rows = await db
       .select({
-        stage: schema.companies.pipelineStage,
+        stage: schema.listMembers.pipelineStage,
         count: sql<number>`count(*)::int`,
       })
       .from(schema.listMembers)
-      .innerJoin(schema.companies, eq(schema.listMembers.companyId, schema.companies.id))
       .where(and(
         eq(schema.listMembers.listId, request.params.id),
         isNull(schema.listMembers.removedAt),
+        isNull(schema.listMembers.contactId),
       ))
-      .groupBy(schema.companies.pipelineStage);
+      .groupBy(schema.listMembers.pipelineStage);
 
     const stages: Record<string, number> = {};
     let total = 0;

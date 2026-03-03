@@ -19,6 +19,7 @@ export const jobTypeEnum = pgEnum('job_type', [
   'contact_list_build',
   'deep_enrichment',
   'market_signal_search',
+  'social_signal_search',
   'brief_generation',
   'buzz_generation',
 ]);
@@ -43,7 +44,7 @@ export const exportFormatEnum = pgEnum('export_format', [
 
 export const signalCategoryEnum = pgEnum('signal_category', [
   // Market-level
-  'regulatory', 'economic', 'industry', 'competitive',
+  'regulatory', 'economic', 'industry', 'competitive', 'social',
   // Company-level
   'funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch',
   // Persona-level

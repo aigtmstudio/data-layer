@@ -7,6 +7,11 @@ import { useClient, useUpdateClient, useDeleteClient } from '@/lib/hooks/use-cli
 import { useIcps, useCreateIcp, useDeleteIcp } from '@/lib/hooks/use-icps';
 import { useCreditBalance, useCreditHistory, useAddCredits } from '@/lib/hooks/use-credits';
 import { useHypotheses, useGenerateHypotheses, useCreateHypothesis, useUpdateHypothesis, useDeleteHypothesis, useClearHypotheses } from '@/lib/hooks/use-hypotheses';
+import { useInfluencers, useCreateInfluencer, useUpdateInfluencer, useDeleteInfluencer, useFetchInfluencerPosts } from '@/lib/hooks/use-influencers';
+import { useMarketSignals } from '@/lib/hooks/use-market-signals';
+import { useCompetitors, useAddCompetitor, useRemoveCompetitor, useCompetitorAlerts, useDismissAlert, useCheckDowntime } from '@/lib/hooks/use-competitor-monitoring';
+import type { Influencer } from '@/lib/api/influencers';
+import type { MonitoredCompetitor, CompetitorDowntimeAlert } from '@/lib/api/competitor-monitoring';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -24,7 +29,7 @@ import {
 } from '@/components/ui/select';
 import { DataTable } from '@/components/shared/data-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt, Trash2, Lightbulb, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt, Trash2, Lightbulb, AlertTriangle, RefreshCw, Globe, Users, ShieldAlert, X, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -118,6 +123,38 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
     }
     prevCountRef.current = count;
   }, [hypotheses, awaitingGeneration]);
+
+  // Influencers
+  const { data: influencers } = useInfluencers(id);
+  const { data: influencerSignals, refetch: refetchInfluencerSignals } = useMarketSignals(id, { sourceName: 'influencer_%', limit: 30 });
+  const createInfluencer = useCreateInfluencer();
+  const updateInfluencer = useUpdateInfluencer();
+  const deleteInfluencerAction = useDeleteInfluencer();
+  const fetchPosts = useFetchInfluencerPosts();
+  const [newInfluencerOpen, setNewInfluencerOpen] = useState(false);
+  const [newInfluencerName, setNewInfluencerName] = useState('');
+  const [newInfluencerPlatform, setNewInfluencerPlatform] = useState<Influencer['platform']>('linkedin');
+  const [newInfluencerHandle, setNewInfluencerHandle] = useState('');
+  const [newInfluencerProfileUrl, setNewInfluencerProfileUrl] = useState('');
+  const [newInfluencerCategory, setNewInfluencerCategory] = useState<Influencer['category']>('industry_expert');
+  const [editInfluencer, setEditInfluencer] = useState<Influencer | null>(null);
+  const [editInfluencerName, setEditInfluencerName] = useState('');
+  const [editInfluencerHandle, setEditInfluencerHandle] = useState('');
+  const [editInfluencerProfileUrl, setEditInfluencerProfileUrl] = useState('');
+  const [editInfluencerCategory, setEditInfluencerCategory] = useState<Influencer['category']>('industry_expert');
+  const [editInfluencerNotes, setEditInfluencerNotes] = useState('');
+
+  // Competitors
+  const { data: competitors } = useCompetitors(id);
+  const addCompetitor = useAddCompetitor();
+  const removeCompetitor = useRemoveCompetitor();
+  const { data: ongoingAlerts } = useCompetitorAlerts(id, 'ongoing');
+  const { data: allAlerts } = useCompetitorAlerts(id);
+  const dismissAlert = useDismissAlert();
+  const checkDowntime = useCheckDowntime();
+  const [newCompetitorOpen, setNewCompetitorOpen] = useState(false);
+  const [newCompetitorName, setNewCompetitorName] = useState('');
+  const [newCompetitorUrl, setNewCompetitorUrl] = useState('');
 
   const [addCreditsOpen, setAddCreditsOpen] = useState(false);
   const [creditAmount, setCreditAmount] = useState('');
@@ -240,6 +277,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="icps">ICPs</TabsTrigger>
           <TabsTrigger value="hypotheses">Signal Hypotheses</TabsTrigger>
+          <TabsTrigger value="influencers">
+            <Users className="mr-1.5 h-3.5 w-3.5" />
+            Influencers
+          </TabsTrigger>
+          <TabsTrigger value="competitors" className="relative">
+            <ShieldAlert className="mr-1.5 h-3.5 w-3.5" />
+            Competitors
+            {(ongoingAlerts?.filter(a => !a.dismissed).length ?? 0) > 0 && (
+              <span className="ml-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-bold text-white">
+                {ongoingAlerts!.filter(a => !a.dismissed).length}
+              </span>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="credits">Credits</TabsTrigger>
         </TabsList>
 
@@ -569,6 +619,288 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
           />
         </TabsContent>
 
+        {/* ── Influencers tab ── */}
+        <TabsContent value="influencers" className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Track key accounts whose posts feed into Market Buzz signals.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const r = await fetchPosts.mutateAsync({ clientId: id });
+                    if (r.influencersChecked === 0) {
+                      const msg = r.totalInfluencers
+                        ? `${r.totalInfluencers} influencer(s) are paused — click Activate to enable them`
+                        : 'No influencers added yet';
+                      toast.info(msg);
+                    } else if (r.errors?.length) {
+                      toast.error(`Fetch failed for @${r.errors[0].handle} (${r.errors[0].platform}): ${r.errors[0].error}`);
+                    } else {
+                      toast.success(`Fetched posts: ${r.signalsIngested} new signals ingested from ${r.influencersChecked} influencers (${r.influencersSkipped} skipped — cooldown)`);
+                      refetchInfluencerSignals();
+                    }
+                  } catch {
+                    toast.error('Failed to fetch posts');
+                  }
+                }}
+                disabled={fetchPosts.isPending}
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${fetchPosts.isPending ? 'animate-spin' : ''}`} />
+                {fetchPosts.isPending ? 'Fetching...' : 'Fetch Posts'}
+              </Button>
+              <Button size="sm" onClick={() => setNewInfluencerOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Influencer
+              </Button>
+            </div>
+          </div>
+
+          {(influencers ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <Users className="mb-3 h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No influencers added yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Add journalists, industry experts, or competitor execs to monitor their posts.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {(influencers ?? []).map((inf) => (
+                <Card key={inf.id}>
+                  <CardContent className="flex items-center gap-4 py-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-sm">{inf.name}</span>
+                        <Badge variant="secondary" className="text-xs capitalize">{inf.platform}</Badge>
+                        {inf.category && <Badge variant="outline" className="text-xs">{inf.category.replace(/_/g, ' ')}</Badge>}
+                        {!inf.isActive && <Badge variant="secondary" className="text-xs text-muted-foreground">Inactive</Badge>}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5">
+                        <span className="text-xs text-muted-foreground">@{inf.handle}</span>
+                        {inf.profileUrl && (
+                          <a href={inf.profileUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-0.5">
+                            <Globe className="h-3 w-3" />Profile
+                          </a>
+                        )}
+                        {inf.lastFetchedAt && (
+                          <span className="text-xs text-muted-foreground">Last fetched {new Date(inf.lastFetchedAt).toLocaleDateString()}</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="text-xs"
+                        onClick={() => updateInfluencer.mutate({ id: inf.id, clientId: id, data: { isActive: !inf.isActive } })}
+                      >
+                        {inf.isActive ? 'Pause' : 'Activate'}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                        onClick={() => {
+                          setEditInfluencer(inf);
+                          setEditInfluencerName(inf.name);
+                          setEditInfluencerHandle(inf.handle);
+                          setEditInfluencerProfileUrl(inf.profileUrl ?? '');
+                          setEditInfluencerCategory(inf.category ?? 'industry_expert');
+                          setEditInfluencerNotes(inf.notes ?? '');
+                        }}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          if (!confirm(`Remove ${inf.name}?`)) return;
+                          deleteInfluencerAction.mutate({ id: inf.id, clientId: id });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          )}
+
+          {/* ── Recent posts feed ── */}
+          {(influencerSignals?.signals?.length ?? 0) > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Recent Posts</p>
+              <div className="space-y-2">
+                {influencerSignals!.signals.map((signal) => (
+                  <Card key={signal.id} className="border-muted">
+                    <CardContent className="py-3 px-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium line-clamp-2">{signal.headline}</p>
+                          {signal.summary && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{signal.summary}</p>
+                          )}
+                          <div className="flex items-center gap-3 mt-1">
+                            <span className="text-[10px] text-muted-foreground font-mono">
+                              {signal.sourceName?.replace('influencer_', '') ?? ''}
+                            </span>
+                            {signal.detectedAt && (
+                              <span className="text-[10px] text-muted-foreground">
+                                {new Date(signal.detectedAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {signal.sourceUrl && (
+                          <a
+                            href={signal.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="shrink-0 text-xs text-primary hover:underline flex items-center gap-0.5 mt-0.5"
+                          >
+                            <Globe className="h-3 w-3" />
+                            View
+                          </a>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* ── Competitors tab ── */}
+        <TabsContent value="competitors" className="space-y-4">
+          {/* Ongoing alert banner */}
+          {(ongoingAlerts?.filter(a => !a.dismissed) ?? []).map((alert: CompetitorDowntimeAlert) => (
+            <Card key={alert.id} className="border-red-200 bg-red-50">
+              <CardContent className="flex items-center gap-3 py-3">
+                <ShieldAlert className="h-5 w-5 text-red-600 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-800">
+                    {alert.competitorName} is down
+                  </p>
+                  <p className="text-xs text-red-600">
+                    Started {new Date(alert.downtimeStartedAt).toLocaleString()}
+                    {alert.durationMinutes ? ` · ${alert.durationMinutes} min` : ''}
+                  </p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 text-red-400 hover:text-red-700"
+                  onClick={() => dismissAlert.mutate({ id: alert.id, clientId: id })}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Monitor competitor uptime. Get alerted when they go down.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={async () => {
+                  try {
+                    const r = await checkDowntime.mutateAsync({ clientId: id });
+                    if (r.newAlerts > 0) {
+                      toast.error(`${r.newAlerts} competitor(s) are down!`);
+                    } else if (r.resolved > 0) {
+                      toast.success(`${r.resolved} outage(s) resolved`);
+                    } else {
+                      toast.success(`All ${r.checked} competitors are up`);
+                    }
+                  } catch {
+                    toast.error('Failed to check downtime');
+                  }
+                }}
+                disabled={checkDowntime.isPending}
+              >
+                <RefreshCw className={`mr-2 h-4 w-4 ${checkDowntime.isPending ? 'animate-spin' : ''}`} />
+                {checkDowntime.isPending ? 'Checking...' : 'Check Now'}
+              </Button>
+              <Button size="sm" onClick={() => setNewCompetitorOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                Add Competitor
+              </Button>
+            </div>
+          </div>
+
+          {(competitors ?? []).length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12 text-center">
+                <ShieldAlert className="mb-3 h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No competitors monitored yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Add competitor URLs to get alerted when they experience downtime.</p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-2">
+              {(competitors ?? []).map((comp: MonitoredCompetitor) => {
+                const activeAlert = (ongoingAlerts ?? []).find(a => a.competitorId === comp.id && !a.dismissed);
+                return (
+                  <Card key={comp.id} className={activeAlert ? 'border-red-200' : ''}>
+                    <CardContent className="flex items-center gap-4 py-3">
+                      <div className={`h-2 w-2 rounded-full flex-shrink-0 ${activeAlert ? 'bg-red-500' : 'bg-green-500'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm">{comp.name}</span>
+                          {activeAlert && <Badge className="text-xs bg-red-100 text-red-700 border-red-200">Down</Badge>}
+                        </div>
+                        <a href={comp.url} target="_blank" rel="noopener noreferrer" className="text-xs text-muted-foreground hover:text-primary">
+                          {comp.url}
+                        </a>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        onClick={() => {
+                          if (!confirm(`Remove ${comp.name} from monitoring? This will also delete the UptimeRobot monitor.`)) return;
+                          removeCompetitor.mutate({ id: comp.id, clientId: id });
+                        }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Alert history */}
+          {(allAlerts ?? []).filter(a => a.status === 'resolved').length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-muted-foreground mb-2 uppercase tracking-wide">Recent Outages</p>
+              <div className="space-y-1">
+                {(allAlerts ?? []).filter(a => a.status === 'resolved').slice(0, 5).map((alert: CompetitorDowntimeAlert) => (
+                  <div key={alert.id} className="flex items-center gap-3 text-xs text-muted-foreground py-1">
+                    <span className="font-medium text-foreground">{alert.competitorName}</span>
+                    <span>{new Date(alert.downtimeStartedAt).toLocaleDateString()}</span>
+                    {alert.durationMinutes && <span>{alert.durationMinutes} min</span>}
+                    <Badge variant="secondary" className="text-xs">Resolved</Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
         <TabsContent value="credits" className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -719,6 +1051,193 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 disabled={createHypothesis.isPending || !newHypothesisText.trim()}
               >
                 {createHypothesis.isPending ? 'Creating...' : 'Create'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Influencer Dialog */}
+      <Dialog open={newInfluencerOpen} onOpenChange={setNewInfluencerOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Influencer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={newInfluencerName} onChange={(e) => setNewInfluencerName(e.target.value)} placeholder="John Smith" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Platform</Label>
+                <Select value={newInfluencerPlatform} onValueChange={(v) => setNewInfluencerPlatform(v as Influencer['platform'])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="linkedin">LinkedIn</SelectItem>
+                    <SelectItem value="twitter">X / Twitter</SelectItem>
+                    <SelectItem value="instagram">Instagram</SelectItem>
+                    <SelectItem value="youtube">YouTube</SelectItem>
+                    <SelectItem value="reddit">Reddit</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={newInfluencerCategory} onValueChange={(v) => setNewInfluencerCategory(v as Influencer['category'])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="industry_expert">Industry Expert</SelectItem>
+                    <SelectItem value="journalist">Journalist</SelectItem>
+                    <SelectItem value="competitor_exec">Competitor Exec</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Handle</Label>
+              <Input value={newInfluencerHandle} onChange={(e) => setNewInfluencerHandle(e.target.value)} placeholder="johnsmith" />
+            </div>
+            <div className="space-y-2">
+              <Label>Profile URL</Label>
+              <Input value={newInfluencerProfileUrl} onChange={(e) => setNewInfluencerProfileUrl(e.target.value)} placeholder="https://linkedin.com/in/johnsmith" />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setNewInfluencerOpen(false)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  if (!newInfluencerName.trim() || !newInfluencerHandle.trim()) return;
+                  try {
+                    await createInfluencer.mutateAsync({
+                      clientId: id,
+                      name: newInfluencerName.trim(),
+                      platform: newInfluencerPlatform,
+                      handle: newInfluencerHandle.trim(),
+                      profileUrl: newInfluencerProfileUrl.trim() || undefined,
+                      category: newInfluencerCategory,
+                    });
+                    setNewInfluencerOpen(false);
+                    setNewInfluencerName('');
+                    setNewInfluencerHandle('');
+                    setNewInfluencerProfileUrl('');
+                    toast.success('Influencer added');
+                  } catch {
+                    toast.error('Failed to add influencer');
+                  }
+                }}
+                disabled={createInfluencer.isPending || !newInfluencerName.trim() || !newInfluencerHandle.trim()}
+              >
+                {createInfluencer.isPending ? 'Adding...' : 'Add'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Influencer Dialog */}
+      <Dialog open={!!editInfluencer} onOpenChange={(open) => { if (!open) setEditInfluencer(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Influencer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={editInfluencerName} onChange={(e) => setEditInfluencerName(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Handle</Label>
+                <Input value={editInfluencerHandle} onChange={(e) => setEditInfluencerHandle(e.target.value)} placeholder="johnsmith" />
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={editInfluencerCategory} onValueChange={(v) => setEditInfluencerCategory(v as Influencer['category'])}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="industry_expert">Industry Expert</SelectItem>
+                    <SelectItem value="journalist">Journalist</SelectItem>
+                    <SelectItem value="competitor_exec">Competitor Exec</SelectItem>
+                    <SelectItem value="customer">Customer</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Profile URL</Label>
+              <Input value={editInfluencerProfileUrl} onChange={(e) => setEditInfluencerProfileUrl(e.target.value)} placeholder="https://linkedin.com/in/johnsmith" />
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea value={editInfluencerNotes} onChange={(e) => setEditInfluencerNotes(e.target.value)} placeholder="Why we're tracking this person..." rows={2} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditInfluencer(null)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  if (!editInfluencer || !editInfluencerName.trim()) return;
+                  try {
+                    await updateInfluencer.mutateAsync({
+                      id: editInfluencer.id,
+                      clientId: id,
+                      data: {
+                        name: editInfluencerName.trim(),
+                        handle: editInfluencerHandle.trim(),
+                        profileUrl: editInfluencerProfileUrl.trim() || undefined,
+                        category: editInfluencerCategory,
+                        notes: editInfluencerNotes.trim() || undefined,
+                      },
+                    });
+                    setEditInfluencer(null);
+                    toast.success('Influencer updated');
+                  } catch {
+                    toast.error('Failed to update influencer');
+                  }
+                }}
+                disabled={updateInfluencer.isPending || !editInfluencerName.trim()}
+              >
+                {updateInfluencer.isPending ? 'Saving...' : 'Save'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Competitor Dialog */}
+      <Dialog open={newCompetitorOpen} onOpenChange={setNewCompetitorOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Add Competitor to Monitor</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Name</Label>
+              <Input value={newCompetitorName} onChange={(e) => setNewCompetitorName(e.target.value)} placeholder="Dojo" />
+            </div>
+            <div className="space-y-2">
+              <Label>URL</Label>
+              <Input value={newCompetitorUrl} onChange={(e) => setNewCompetitorUrl(e.target.value)} placeholder="https://dojo.tech" />
+              <p className="text-xs text-muted-foreground">The URL to monitor for uptime. This will create an UptimeRobot monitor.</p>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setNewCompetitorOpen(false)}>Cancel</Button>
+              <Button
+                onClick={async () => {
+                  if (!newCompetitorName.trim() || !newCompetitorUrl.trim()) return;
+                  try {
+                    await addCompetitor.mutateAsync({ clientId: id, name: newCompetitorName.trim(), url: newCompetitorUrl.trim() });
+                    setNewCompetitorOpen(false);
+                    setNewCompetitorName('');
+                    setNewCompetitorUrl('');
+                    toast.success('Competitor added to monitoring');
+                  } catch {
+                    toast.error('Failed to add competitor');
+                  }
+                }}
+                disabled={addCompetitor.isPending || !newCompetitorName.trim() || !newCompetitorUrl.trim()}
+              >
+                {addCompetitor.isPending ? 'Adding...' : 'Add'}
               </Button>
             </div>
           </div>

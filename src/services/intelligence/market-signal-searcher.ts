@@ -5,16 +5,24 @@ import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 import type { ExaProvider } from '../../providers/exa/index.js';
 import type { TavilyProvider } from '../../providers/tavily/index.js';
+import type { ApifyProvider } from '../../providers/apify/index.js';
+import type { SocialPlatform } from '../../providers/apify/types.js';
 import type { MarketSignalProcessor } from './market-signal-processor.js';
 
-export const QUERY_GENERATION_PROMPT = `Given a market signal hypothesis, generate 1-2 concise search queries to find recent news evidence that would validate or invalidate this hypothesis.
+export const QUERY_GENERATION_PROMPT = `Given a market signal hypothesis about a macro market condition, generate 1-2 search queries to find recent coverage from AUTHORITATIVE, HIGH-CREDIBILITY sources.
 
-Each query should be specific enough to find relevant news articles from the last 30 days.
-Focus on current events, not background information.
-Include the current year/month where relevant to anchor queries to recent content.
+Think about the kind of content a CEO would actually read and trust when preparing for a board meeting:
+- Major financial press: Financial Times, Bloomberg, Wall Street Journal, Reuters, The Economist
+- Analyst and advisory firms: McKinsey, Gartner, Forrester, Deloitte, BCG, PwC, S&P Global
+- Regulatory and government bodies: Official announcements, regulatory press releases, legislative updates
+- Established industry publications with full editorial standards
+
+Use precise, formal language appropriate to the hypothesis — queries should naturally attract high-quality editorial content, not blog posts or social media commentary.
+Include the current year/month to anchor queries to recent content.
+Each query should be specific enough to find relevant articles from the last 30 days.
 
 Return ONLY a valid JSON array of 1-2 search query strings.
-Example: ["EU AI Act enforcement timeline 2025", "AI regulation compliance requirements enterprise SaaS"]`;
+Example: ["EU AI Act compliance enforcement enterprise software 2026", "UK fintech regulatory reform FCA impact analysis 2026"]`;
 
 registerPrompt({
   key: 'signal.market.query_generation.system',
@@ -26,18 +34,23 @@ registerPrompt({
   defaultContent: QUERY_GENERATION_PROMPT,
 });
 
-export const BROAD_TRENDING_PROMPT = `Given a client's ICP (Ideal Customer Profile) data, generate 2-4 broad search queries to find trending news and social discussions in their target market.
+export const BROAD_TRENDING_PROMPT = `Given a client's ICP (Ideal Customer Profile) data, generate 2-4 search queries to find macro-level developments that a CEO in this market would be tracking — as reported by authoritative, high-credibility sources.
 
-These queries should NOT be about specific hypotheses — instead they should capture:
-- Breaking news in the ICP's industries
-- Trending discussions among the ICP's target personas
-- Recent developments related to the ICP's key topics/keywords
+These queries should NOT be about specific hypotheses. Instead, surface the kind of developments that would appear in a CEO's board briefing pack:
+- Major regulatory or policy changes affecting the ICP's sector
+- Significant economic or structural shifts reported by analyst firms or financial press
+- Large-scale competitive moves (consolidation, major new entrants, platform disruption)
+- Macro technology or market transitions covered by Gartner, McKinsey, or equivalent
+
+Prioritise coverage from: Financial Times, Bloomberg, WSJ, Reuters, McKinsey, Gartner, Forrester, Deloitte, and established sector publications with editorial standards.
+
+Do NOT generate queries for social media trends, blog commentary, or opinion pieces — this is about developments that belong on a board agenda.
 
 Use the current date to anchor queries to very recent content.
 Include industry-specific terminology from the ICP keywords.
 
 Return ONLY a valid JSON array of 2-4 search query strings.
-Example: ["fintech regulatory changes 2026", "enterprise SaaS buyer sentiment shift", "UK B2B tech growth trends"]`;
+Example: ["enterprise SaaS market consolidation outlook 2026 Gartner", "UK B2B tech regulatory environment Q1 2026", "CFO software spending priorities analyst report 2026"]`;
 
 registerPrompt({
   key: 'signal.market.broad_trending.system',
@@ -55,12 +68,15 @@ export interface EvidenceSearchResult {
   signalsIngested: number;
   trendingSearchesPerformed?: number;
   trendingSignalsIngested?: number;
+  socialSearchesPerformed?: number;
+  socialSignalsIngested?: number;
 }
 
 export class MarketSignalSearcher {
   private anthropic: Anthropic;
   private exaProvider?: ExaProvider;
   private tavilyProvider?: TavilyProvider;
+  private apifyProvider?: ApifyProvider;
   private marketSignalProcessor: MarketSignalProcessor;
   private promptConfig?: PromptConfigService;
   private log = logger.child({ service: 'market-signal-searcher' });
@@ -68,12 +84,13 @@ export class MarketSignalSearcher {
   constructor(
     anthropicClient: Anthropic,
     marketSignalProcessor: MarketSignalProcessor,
-    providers: { exa?: ExaProvider; tavily?: TavilyProvider },
+    providers: { exa?: ExaProvider; tavily?: TavilyProvider; apify?: ApifyProvider },
   ) {
     this.anthropic = anthropicClient;
     this.marketSignalProcessor = marketSignalProcessor;
     this.exaProvider = providers.exa;
     this.tavilyProvider = providers.tavily;
+    this.apifyProvider = providers.apify;
   }
 
   setPromptConfig(promptConfig: PromptConfigService) {
@@ -342,6 +359,107 @@ Affected Segments: ${segments}`;
       log.warn('No search provider available or no results found');
     }
     return totalIngested;
+  }
+
+  // ── Social Media Search ────────────────────────────────────────────────
+
+  /**
+   * Search social platforms for posts matching ICP social keywords.
+   * Results are ingested as market signals (sourceName: apify_<platform>).
+   */
+  async searchSocialMedia(
+    clientId: string,
+    options?: { platforms?: SocialPlatform[]; postsPerPlatform?: number; cooldownHours?: number },
+  ): Promise<{ searchesPerformed: number; signalsIngested: number }> {
+    if (!this.apifyProvider) {
+      this.log.info('Apify provider not configured, skipping social media search');
+      return { searchesPerformed: 0, signalsIngested: 0 };
+    }
+
+    const db = getDb();
+    const platforms = options?.platforms ?? ['instagram', 'twitter', 'youtube', 'reddit', 'linkedin'];
+    const postsPerPlatform = options?.postsPerPlatform ?? 20;
+    const cooldownHours = options?.cooldownHours ?? 24;
+
+    // Load active ICPs and collect social keywords
+    const icps = await db
+      .select()
+      .from(schema.icps)
+      .where(and(
+        eq(schema.icps.clientId, clientId),
+        eq(schema.icps.isActive, true),
+      ));
+
+    const allKeywords: string[] = [];
+    for (const icp of icps) {
+      const socialKeywords = icp.socialKeywords as string[] | null;
+      if (socialKeywords?.length) allKeywords.push(...socialKeywords);
+    }
+
+    if (allKeywords.length === 0) {
+      this.log.info({ clientId }, 'No social keywords configured, skipping social media search');
+      return { searchesPerformed: 0, signalsIngested: 0 };
+    }
+
+    const uniqueKeywords = [...new Set(allKeywords)];
+
+    // Pre-load existing sourceUrls for deduplication
+    const existingSignals = await db
+      .select({ sourceUrl: schema.marketSignals.sourceUrl })
+      .from(schema.marketSignals)
+      .where(eq(schema.marketSignals.clientId, clientId));
+    const existingUrls = new Set(existingSignals.map(s => s.sourceUrl).filter((u): u is string => !!u));
+
+    // Apply cooldown: skip posts already seen within cooldown window
+    const cooldownCutoff = new Date(Date.now() - cooldownHours * 60 * 60 * 1000);
+
+    this.log.info({ clientId, platforms, keywords: uniqueKeywords, postsPerPlatform }, 'Starting social media search');
+
+    let totalSearches = 0;
+    let totalIngested = 0;
+
+    for (const platform of platforms) {
+      try {
+        const posts = await this.apifyProvider.searchSocialPosts({
+          platform,
+          keywords: uniqueKeywords,
+          limit: postsPerPlatform,
+        });
+        totalSearches++;
+
+        const signals = posts
+          .filter(post => {
+            if (!post.url) return false;
+            if (existingUrls.has(post.url)) return false;
+            if (post.publishedAt && new Date(post.publishedAt) < cooldownCutoff) return false;
+            return true;
+          })
+          .map(post => ({
+            clientId,
+            headline: post.text.slice(0, 200).replace(/\s+/g, ' ').trim() || `${platform} post`,
+            summary: post.text.slice(0, 1000),
+            sourceUrl: post.url,
+            sourceName: `apify_${platform}` as string,
+            rawData: post.rawData as Record<string, unknown> | undefined,
+            detectedAt: post.publishedAt,
+          }));
+
+        if (signals.length > 0) {
+          for (const s of signals) {
+            if (s.sourceUrl) existingUrls.add(s.sourceUrl);
+          }
+          await this.marketSignalProcessor.ingestBatch(signals);
+          totalIngested += signals.length;
+        }
+
+        this.log.info({ platform, fetched: posts.length, ingested: signals.length }, 'Social platform searched');
+      } catch (error) {
+        this.log.error({ error, platform }, 'Social media search failed for platform');
+      }
+    }
+
+    this.log.info({ totalSearches, totalIngested }, 'Social media search complete');
+    return { searchesPerformed: totalSearches, signalsIngested: totalIngested };
   }
 
   // ── Broad Trending Search ──

@@ -36,8 +36,11 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { formatRelativeTime, formatNumber } from '@/lib/utils';
-import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2, Loader2, FileText, MessageSquare, Briefcase, TrendingUp, User, Building2, Mail, Phone, Linkedin, MapPin } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Download, Clock, Zap, ChevronRight, Play, Users, UserCircle, Radar, ExternalLink, ChevronDown, Trash2, Loader2, FileText, MessageSquare, Briefcase, TrendingUp, User, Building2, Mail, Phone, Linkedin, MapPin, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
+import * as discoveryApi from '@/lib/api/discovery';
+import * as marketBuilderApi from '@/lib/api/market-builder';
+import type { MarketBuilderPlan, SavedPlan as MarketBuilderSavedPlan } from '@/lib/api/market-builder';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
 import type { ListMember, PipelineStage, CompanySignal, ContactSignal, SignalStrengthTier, EngagementBrief } from '@/lib/types';
@@ -911,6 +914,29 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [selectedProviders, setSelectedProviders] = useState<string[]>([]);
   const { data: availableProviders } = useAvailableProviders();
 
+  // Local discovery sources
+  const [discoveryOpen, setDiscoveryOpen] = useState(false);
+  const [discNewsEnabled, setDiscNewsEnabled] = useState(false);
+  const [discNewsQueries, setDiscNewsQueries] = useState('');
+  const [discPlacesEnabled, setDiscPlacesEnabled] = useState(false);
+  const [discPlacesQuery, setDiscPlacesQuery] = useState('');
+  const [discPlacesLocation, setDiscPlacesLocation] = useState('');
+  const [discReviewsEnabled, setDiscReviewsEnabled] = useState(false);
+  const [discReviewsLocation, setDiscReviewsLocation] = useState('');
+  const [discReviewsCategory, setDiscReviewsCategory] = useState('');
+  const [discListingsEnabled, setDiscListingsEnabled] = useState(false);
+  const [discListingsPlatform, setDiscListingsPlatform] = useState<'opentable' | 'ubereats' | 'justeat'>('opentable');
+  const [discListingsLocation, setDiscListingsLocation] = useState('');
+
+  // AI Market Builder state
+  const [aiPlanOpen, setAiPlanOpen] = useState(false);
+  const [aiPlan, setAiPlan] = useState<MarketBuilderPlan | null>(null);
+  const [aiSavedPlan, setAiSavedPlan] = useState<MarketBuilderSavedPlan | null>(null);
+  const [aiPlanLoading, setAiPlanLoading] = useState(false);
+  const [aiPlanRefining, setAiPlanRefining] = useState(false);
+  const [aiPlanApproving, setAiPlanApproving] = useState(false);
+  const [aiPlanFeedback, setAiPlanFeedback] = useState('');
+
   // Find Buying Committee dialog state
   const [buyingCommitteeOpen, setBuyingCommitteeOpen] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>('');
@@ -918,6 +944,20 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [applyingSignals, setApplyingSignals] = useState(false);
   const [personaSignalRunning, setPersonaSignalRunning] = useState(false);
   const [briefGenRunning, setBriefGenRunning] = useState(false);
+
+  // Load existing approved AI plan when dialog opens
+  useEffect(() => {
+    if (!buildOptionsOpen || !list?.clientId) return;
+    marketBuilderApi.getApprovedPlan(list.clientId)
+      .then(plan => {
+        if (plan) {
+          setAiSavedPlan(plan);
+          setAiPlan(plan.plan);
+          setAiPlanOpen(true);
+        }
+      })
+      .catch(() => { /* silent — not critical */ });
+  }, [buildOptionsOpen, list?.clientId]);
 
   // Poll build/job status and show toast on completion
   useEffect(() => {
@@ -1604,12 +1644,12 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
 
       {/* Build Options Dialog */}
       <Dialog open={buildOptionsOpen} onOpenChange={setBuildOptionsOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-lg max-h-[90vh] flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>{list.memberCount > 0 ? 'Rebuild List' : 'Build List'}</DialogTitle>
             <DialogDescription>Configure how companies are discovered and added to this list.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-5 py-2">
+          <div className="space-y-5 py-2 overflow-y-auto flex-1 pr-1">
             {/* Target count */}
             <div className="space-y-1.5">
               <Label htmlFor="build-limit">Target companies to discover</Label>
@@ -1681,13 +1721,305 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
                 )}
               </div>
             )}
+
+            {/* AI Market Builder Strategy */}
+            <div className="space-y-2 border rounded-lg p-3 bg-muted/30">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-purple-600 flex-shrink-0" />
+                  <span className="text-sm font-medium">AI Market Builder</span>
+                  {aiSavedPlan && (
+                    <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5">Plan saved</span>
+                  )}
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={aiPlanLoading}
+                  onClick={async () => {
+                    const clientId = list?.clientId;
+                    if (!clientId) return;
+                    setAiPlanLoading(true);
+                    setAiPlanOpen(true);
+                    try {
+                      const plan = await marketBuilderApi.generateMarketPlan(clientId);
+                      setAiPlan(plan);
+                      setAiSavedPlan(null);
+                      setAiPlanFeedback('');
+                    } catch {
+                      toast.error('Failed to generate plan');
+                    } finally {
+                      setAiPlanLoading(false);
+                    }
+                  }}
+                >
+                  {aiPlanLoading
+                    ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Thinking…</>
+                    : aiPlan
+                      ? <><Sparkles className="mr-1.5 h-3 w-3" />Regenerate</>
+                      : <><Sparkles className="mr-1.5 h-3 w-3" />Generate Plan</>
+                  }
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Opus analyses your ICP and selects the right discovery sources automatically. Use this <em>instead of</em> Manual Discovery below.
+              </p>
+
+              {aiPlanOpen && aiPlan && !aiPlanLoading && (
+                <div className="space-y-3 pt-1">
+                  {/* Vertical badge + outcome */}
+                  <div className="flex items-start gap-2 flex-wrap">
+                    <span className="inline-flex items-center rounded-full bg-purple-100 text-purple-800 text-xs font-medium px-2 py-0.5">{aiPlan.vertical}</span>
+                    <span className="text-xs text-muted-foreground">{aiPlan.expectedOutcome}</span>
+                  </div>
+
+                  {/* Reasoning — render paragraphs */}
+                  <div className="text-xs text-foreground/80 space-y-1.5 leading-relaxed">
+                    {aiPlan.reasoning.split('\n\n').filter(Boolean).map((para, i) => (
+                      <p key={i}>{para.replace(/^#+\s*/, '')}</p>
+                    ))}
+                  </div>
+
+                  {/* Provider list */}
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Providers</p>
+                    <div className="space-y-1">
+                      {aiPlan.providers.map((task, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs">
+                          <span className={`rounded px-1.5 py-0.5 font-mono flex-shrink-0 ${task.priority === 'primary' ? 'bg-blue-100 text-blue-800' : 'bg-gray-100 text-gray-600'}`}>
+                            {task.provider}
+                          </span>
+                          <span className="text-muted-foreground">{task.rationale}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Feedback */}
+                  <div className="space-y-1.5">
+                    <input
+                      type="text"
+                      className="w-full text-xs border border-input rounded px-2.5 py-1.5 bg-background placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring"
+                      placeholder="Tell the AI what to change… (e.g. remove reviews, add LinkedIn)"
+                      value={aiPlanFeedback}
+                      onChange={e => setAiPlanFeedback(e.target.value)}
+                      onKeyDown={async e => {
+                        if (e.key !== 'Enter' || !aiPlanFeedback.trim() || aiPlanRefining) return;
+                        const clientId = list?.clientId;
+                        if (!clientId) return;
+                        setAiPlanRefining(true);
+                        try {
+                          const refined = await marketBuilderApi.refineMarketPlan(clientId, aiPlan, aiPlanFeedback);
+                          setAiPlan(refined);
+                          setAiSavedPlan(null);
+                          setAiPlanFeedback('');
+                        } catch { toast.error('Failed to refine plan'); }
+                        finally { setAiPlanRefining(false); }
+                      }}
+                    />
+                    {aiPlanFeedback.trim() && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="w-full text-xs h-7"
+                        disabled={aiPlanRefining}
+                        onClick={async () => {
+                          const clientId = list?.clientId;
+                          if (!clientId) return;
+                          setAiPlanRefining(true);
+                          try {
+                            const refined = await marketBuilderApi.refineMarketPlan(clientId, aiPlan, aiPlanFeedback);
+                            setAiPlan(refined);
+                            setAiSavedPlan(null);
+                            setAiPlanFeedback('');
+                          } catch { toast.error('Failed to refine plan'); }
+                          finally { setAiPlanRefining(false); }
+                        }}
+                      >
+                        {aiPlanRefining ? <><Loader2 className="mr-1.5 h-3 w-3 animate-spin" />Refining…</> : 'Refine Plan'}
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Approve + Execute */}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full bg-purple-600 hover:bg-purple-700 text-white text-xs"
+                    disabled={aiPlanApproving}
+                    onClick={async () => {
+                      const clientId = list?.clientId;
+                      if (!clientId) return;
+                      setAiPlanApproving(true);
+                      try {
+                        const saved = await marketBuilderApi.approveMarketPlan(clientId, aiPlan);
+                        setAiSavedPlan(saved);
+                        await marketBuilderApi.executeMarketPlan(saved.id, clientId, id);
+                        setBuildOptionsOpen(false);
+                        toast.success('AI market build started — running in background (2–8 min)');
+                      } catch { toast.error('Failed to start market build'); }
+                      finally { setAiPlanApproving(false); }
+                    }}
+                  >
+                    {aiPlanApproving
+                      ? <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Starting…</>
+                      : <><Sparkles className="mr-1.5 h-3.5 w-3.5" />Approve & Execute</>
+                    }
+                  </Button>
+                  {aiSavedPlan && (
+                    <p className="text-xs text-green-700 text-center">Plan v{aiPlan.version} saved — future builds will use this as a reference</p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Manual Discovery Sources */}
+            <div className="space-y-2">
+              <button
+                type="button"
+                className="flex items-center gap-1.5 text-sm font-medium w-full text-left"
+                onClick={() => setDiscoveryOpen(!discoveryOpen)}
+              >
+                <ChevronRight className={`h-4 w-4 transition-transform flex-shrink-0 ${discoveryOpen ? 'rotate-90' : ''}`} />
+                Manual Discovery
+                <span className="text-xs text-muted-foreground font-normal">(optional — run specific sources yourself)</span>
+              </button>
+              {discoveryOpen && (
+                <div className="space-y-4 pl-5 border-l-2 border-muted pt-1">
+                  {/* News Discovery */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" id="disc-news" checked={discNewsEnabled} onChange={e => setDiscNewsEnabled(e.target.checked)} className="h-4 w-4 rounded border-input" />
+                      <label htmlFor="disc-news" className="text-sm font-medium cursor-pointer">News Discovery</label>
+                      <span className="text-xs text-muted-foreground">Find businesses from news articles</span>
+                    </div>
+                    {discNewsEnabled && (
+                      <Input
+                        value={discNewsQueries}
+                        onChange={e => setDiscNewsQueries(e.target.value)}
+                        placeholder="new restaurant opening London, café expansion Manchester"
+                        className="text-xs h-8"
+                      />
+                    )}
+                    {discNewsEnabled && <p className="text-xs text-muted-foreground">Comma-separated search queries</p>}
+                  </div>
+
+                  {/* Google Places */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" id="disc-places" checked={discPlacesEnabled} onChange={e => setDiscPlacesEnabled(e.target.checked)} className="h-4 w-4 rounded border-input" />
+                      <label htmlFor="disc-places" className="text-sm font-medium cursor-pointer">Google Places</label>
+                      <span className="text-xs text-muted-foreground">Find local businesses by category</span>
+                    </div>
+                    {discPlacesEnabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input value={discPlacesQuery} onChange={e => setDiscPlacesQuery(e.target.value)} placeholder="restaurants" className="text-xs h-8" />
+                        <Input value={discPlacesLocation} onChange={e => setDiscPlacesLocation(e.target.value)} placeholder="London, UK" className="text-xs h-8" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Negative Reviews */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" id="disc-reviews" checked={discReviewsEnabled} onChange={e => setDiscReviewsEnabled(e.target.checked)} className="h-4 w-4 rounded border-input" />
+                      <label htmlFor="disc-reviews" className="text-sm font-medium cursor-pointer">Negative Reviews</label>
+                      <span className="text-xs text-muted-foreground">Businesses with payment complaints</span>
+                    </div>
+                    {discReviewsEnabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Input value={discReviewsLocation} onChange={e => setDiscReviewsLocation(e.target.value)} placeholder="London, UK" className="text-xs h-8" />
+                        <Input value={discReviewsCategory} onChange={e => setDiscReviewsCategory(e.target.value)} placeholder="restaurant (optional)" className="text-xs h-8" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Platform Listings */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <input type="checkbox" id="disc-listings" checked={discListingsEnabled} onChange={e => setDiscListingsEnabled(e.target.checked)} className="h-4 w-4 rounded border-input" />
+                      <label htmlFor="disc-listings" className="text-sm font-medium cursor-pointer">Platform Listings</label>
+                      <span className="text-xs text-muted-foreground">OpenTable, UberEats, JustEat</span>
+                    </div>
+                    {discListingsEnabled && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <Select value={discListingsPlatform} onValueChange={v => setDiscListingsPlatform(v as typeof discListingsPlatform)}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="opentable">OpenTable</SelectItem>
+                            <SelectItem value="ubereats">UberEats</SelectItem>
+                            <SelectItem value="justeat">JustEat</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <Input value={discListingsLocation} onChange={e => setDiscListingsLocation(e.target.value)} placeholder="London" className="text-xs h-8" />
+                      </div>
+                    )}
+                  </div>
+
+                  {(discNewsEnabled || discPlacesEnabled || discReviewsEnabled || discListingsEnabled) && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2.5 py-1.5">
+                      Discovery runs in the background (2–8 min via Apify). Use <strong>Discover</strong> first, then run <strong>Build</strong> again once it completes to pull discovered companies into this list.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={() => setBuildOptionsOpen(false)}>Cancel</Button>
-            <Button onClick={handleBuildSubmit} disabled={isBuildingList}>
-              <Play className="mr-2 h-4 w-4" />
-              {list.memberCount > 0 ? 'Rebuild' : 'Build'}
-            </Button>
+          <div className="flex-shrink-0 pt-2">
+          {(() => {
+            const hasDiscovery = discNewsEnabled || discPlacesEnabled || discReviewsEnabled || discListingsEnabled;
+            if (hasDiscovery) {
+              return (
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" onClick={() => setBuildOptionsOpen(false)}>Cancel</Button>
+                  <Button
+                    variant="outline"
+                    onClick={async () => {
+                      const clientId = list?.clientId;
+                      if (!clientId) return;
+                      setBuildOptionsOpen(false);
+                      const discoverySources: Promise<void>[] = [];
+                      if (discNewsEnabled && discNewsQueries.trim()) {
+                        const queries = discNewsQueries.split(',').map(q => q.trim()).filter(Boolean);
+                        if (queries.length > 0) discoverySources.push(discoveryApi.discoverFromNews({ clientId, queries }));
+                      }
+                      if (discPlacesEnabled && discPlacesQuery.trim() && discPlacesLocation.trim()) {
+                        discoverySources.push(discoveryApi.discoverFromGooglePlaces({ clientId, query: discPlacesQuery.trim(), location: discPlacesLocation.trim() }));
+                      }
+                      if (discReviewsEnabled && discReviewsLocation.trim()) {
+                        discoverySources.push(discoveryApi.discoverFromReviews({ clientId, location: discReviewsLocation.trim(), category: discReviewsCategory.trim() || undefined }));
+                      }
+                      if (discListingsEnabled && discListingsLocation.trim()) {
+                        discoverySources.push(discoveryApi.discoverFromListings({ clientId, platform: discListingsPlatform, location: discListingsLocation.trim() }));
+                      }
+                      if (discoverySources.length > 0) {
+                        Promise.all(discoverySources).catch(() => {});
+                        toast.success(`${discoverySources.length} discovery source(s) running in background — run Build again when complete`);
+                      }
+                    }}
+                  >
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Discover
+                  </Button>
+                  <Button onClick={handleBuildSubmit} disabled={isBuildingList}>
+                    <Play className="mr-2 h-4 w-4" />
+                    {list.memberCount > 0 ? 'Rebuild' : 'Build'}
+                  </Button>
+                </div>
+              );
+            }
+            return (
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setBuildOptionsOpen(false)}>Cancel</Button>
+                <Button onClick={handleBuildSubmit} disabled={isBuildingList}>
+                  <Play className="mr-2 h-4 w-4" />
+                  {list.memberCount > 0 ? 'Rebuild' : 'Build'}
+                </Button>
+              </div>
+            );
+          })()}
           </div>
         </DialogContent>
       </Dialog>

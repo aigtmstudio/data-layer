@@ -40,6 +40,10 @@ import { FirecrawlProvider } from './providers/firecrawl/index.js';
 import { ScrapeGraphProvider } from './providers/scrapegraph/index.js';
 import { JinaProvider } from './providers/jina/index.js';
 import { CompanyDiscoveryService } from './services/company-discovery/index.js';
+import { InfluencerMonitorService } from './services/intelligence/influencer-monitor.js';
+import { CompetitorMonitorService } from './services/intelligence/competitor-monitor.js';
+import { MarketBuilderService } from './services/intelligence/market-builder.js';
+import { UptimeRobotProvider } from './providers/uptimerobot/index.js';
 import { PromptConfigService } from './services/prompt-config/index.js';
 import { createTrackedAnthropicClient } from './lib/llm-tracker.js';
 import { logger } from './lib/logger.js';
@@ -72,6 +76,14 @@ export interface ServiceContainer {
   engagementBriefGenerator: EngagementBriefGenerator;
   // Market buzz
   marketBuzzGenerator: MarketBuzzGenerator;
+  // Company discovery (already exists, expose for discovery routes)
+  companyDiscovery: CompanyDiscoveryService;
+  // Influencer monitoring (optional — requires Apify)
+  influencerMonitor?: InfluencerMonitorService;
+  // Competitor downtime monitoring (optional — requires UptimeRobot)
+  competitorMonitor?: CompetitorMonitorService;
+  // Market builder AI strategist
+  marketBuilder: MarketBuilderService;
 }
 
 let container: ServiceContainer;
@@ -98,6 +110,7 @@ async function main() {
   // Instantiate providers (shared across orchestrator + signal services)
   const exaProvider = config.exaApiKey ? new ExaProvider(config.exaApiKey) : undefined;
   const tavilyProvider = config.tavilyApiKey ? new TavilyProvider(config.tavilyApiKey) : undefined;
+  const apifyProvider = config.apifyApiKey ? new ApifyProvider(config.apifyApiKey) : undefined;
   const firecrawlProvider = config.firecrawlApiKey ? new FirecrawlProvider(config.firecrawlApiKey) : undefined;
 
   // Register providers with orchestrator (ordered by priority — cheapest first)
@@ -106,7 +119,7 @@ async function main() {
   orchestrator.registerProvider(new ProspeoProvider(config.prospeoApiKey), 3);
   if (exaProvider) orchestrator.registerProvider(exaProvider, 4);
   if (tavilyProvider) orchestrator.registerProvider(tavilyProvider, 5);
-  if (config.apifyApiKey) orchestrator.registerProvider(new ApifyProvider(config.apifyApiKey), 6);
+  if (apifyProvider) orchestrator.registerProvider(apifyProvider, 6);
   if (config.parallelApiKey) orchestrator.registerProvider(new ParallelProvider(config.parallelApiKey), 7);
   if (config.valyuApiKey) orchestrator.registerProvider(new ValyuProvider(config.valyuApiKey), 8);
   if (config.diffbotApiKey) orchestrator.registerProvider(new DiffbotProvider(config.diffbotApiKey), 9);
@@ -129,11 +142,15 @@ async function main() {
     hypothesisGenerator: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'hypothesis-generator' }),
     icpParser: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'icp-parser' }),
     companyDiscovery: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'company-discovery' }),
+    marketBuilder: createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'market-builder' }),
   };
 
   const enrichmentPipeline = new EnrichmentPipeline(orchestrator);
   const discoveryService = new CompanyDiscoveryService(orchestrator, enrichmentPipeline, llm.companyDiscovery);
   discoveryService.setPromptConfig(promptConfigService);
+  if (tavilyProvider) discoveryService.setTavilyProvider(tavilyProvider);
+  if (apifyProvider) discoveryService.setApifyProvider(apifyProvider);
+  if (exaProvider) discoveryService.setExaProvider(exaProvider);
   const listBuilder = new ListBuilder();
   listBuilder.setDiscoveryService(discoveryService);
   listBuilder.setEnrichmentPipeline(enrichmentPipeline);
@@ -196,14 +213,33 @@ async function main() {
     logger.info('Deep enrichment service initialized (Jina primary, Firecrawl fallback)');
   }
 
-  if (exaProvider || tavilyProvider) {
+  if (exaProvider || tavilyProvider || apifyProvider) {
     marketSignalSearcher = new MarketSignalSearcher(
       llm.marketSignalSearcher, marketSignalProcessor,
-      { exa: exaProvider, tavily: tavilyProvider },
+      { exa: exaProvider, tavily: tavilyProvider, apify: apifyProvider },
     );
     marketSignalSearcher.setPromptConfig(promptConfigService);
-    logger.info({ exa: !!exaProvider, tavily: !!tavilyProvider }, 'Market signal searcher initialized');
+    logger.info({ exa: !!exaProvider, tavily: !!tavilyProvider, apify: !!apifyProvider }, 'Market signal searcher initialized');
   }
+
+  // Influencer monitoring (requires Apify)
+  let influencerMonitor: InfluencerMonitorService | undefined;
+  if (apifyProvider) {
+    influencerMonitor = new InfluencerMonitorService(apifyProvider, marketSignalProcessor);
+    logger.info('Influencer monitor service initialized');
+  }
+
+  // Competitor downtime monitoring (requires UptimeRobot)
+  let competitorMonitor: CompetitorMonitorService | undefined;
+  if (config.uptimerobotApiKey) {
+    const uptimeRobotProvider = new UptimeRobotProvider(config.uptimerobotApiKey);
+    competitorMonitor = new CompetitorMonitorService(uptimeRobotProvider);
+    logger.info('Competitor monitor service initialized');
+  }
+
+  // Market builder AI strategist
+  const marketBuilder = new MarketBuilderService(discoveryService, listBuilder, llm.marketBuilder);
+  logger.info('Market builder service initialized');
 
   // 4. Store in container
   container = {
@@ -229,6 +265,10 @@ async function main() {
     marketSignalSearcher,
     engagementBriefGenerator,
     marketBuzzGenerator,
+    companyDiscovery: discoveryService,
+    influencerMonitor,
+    competitorMonitor,
+    marketBuilder,
   };
 
   // 5. Start scheduler with handlers

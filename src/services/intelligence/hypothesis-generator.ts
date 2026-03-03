@@ -32,7 +32,7 @@ const PERSONA_DETECTION_METHODS = [
 
 // -- Valid categories per level --
 
-const MARKET_CATEGORIES = ['regulatory', 'economic', 'industry', 'competitive'] as const;
+const MARKET_CATEGORIES = ['regulatory', 'economic', 'industry', 'competitive', 'social'] as const;
 const COMPANY_CATEGORIES = ['funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch'] as const;
 const PERSONA_CATEGORIES = ['job_change', 'title_match', 'seniority_match', 'tenure_signal'] as const;
 
@@ -41,44 +41,58 @@ type ValidCategory = typeof ALL_CATEGORIES[number];
 
 // -- Prompts --
 
-export const MARKET_HYPOTHESIS_PROMPT = `You are a B2B market signal strategist. Generate a small number of simple, broad, testable hypotheses about MACRO-LEVEL market conditions that indicate increased buying urgency across the client's entire target market.
+export const MARKET_HYPOTHESIS_PROMPT = `You are a strategic intelligence analyst preparing a brief for a CEO entering their quarterly board meeting. Generate a small number of MACRO-LEVEL hypotheses about market conditions that a C-suite executive at a company in this ICP would be actively wrestling with and bringing to their board.
+
+## The CEO/Board Lens
+
+Think from the perspective of the CEO of a target company in this ICP. What external forces are shaping their industry right now that demand executive-level attention and strategic decisions? These are not day-to-day operational concerns — they are board-agenda items:
+
+- Regulatory shifts that create legal exposure, force compliance investment, or open new markets
+- Economic conditions affecting the sector's growth trajectory, capital availability, or cost base
+- Competitive or structural market shifts — consolidation, major new entrants, platform disruption
+- Technology transitions threatening existing business models or creating urgent competitive pressure
+- Macro demand or sector dynamics changing how their customers or market behaves
+
+## Source Standard
+
+Hypotheses must be anchored to developments that would be covered by authoritative, high-credibility sources: major financial press (FT, Bloomberg, WSJ, Reuters), analyst firms (Gartner, McKinsey, Forrester, Deloitte), or official regulatory bodies. If a hypothesis would only appear in a blog post or social media thread, it is not board-level.
 
 ## What makes a good hypothesis
 
-- BROAD: Applies to a large portion of the ICP, not a niche subset
-- SIMPLE: One clear causal link — "X is happening, so companies need Y"
-- DETECTABLE: Can be confirmed or denied by searching recent news right now
-- HIGH SIGNAL: If the hypothesis is true, most companies in the ICP segment genuinely need the client's product
+- BOARD-LEVEL: A CEO would put this on their quarterly board agenda, not just an ops meeting
+- MACRO: Affects a large portion of the ICP, not a niche subset
+- CREDIBLE: Anchored to conditions already being reported in authoritative press
+- DETECTABLE: Confirmable by searching credible news or analyst sources today
 
 Bad example (too narrow): "UK SaaS companies with >200 employees migrating from Salesforce to HubSpot are evaluating GTM consultants"
-Good example (broad): "UK SaaS scale-ups are under pressure to improve revenue efficiency as the VC funding climate tightens"
+Good example (board-level): "Tightening enterprise software budgets are forcing UK SaaS scale-ups to consolidate their tech stack and demonstrate ROI on every vendor renewal"
 
 ## Categories
 
-- regulatory: New legislation, compliance deadlines, policy shifts that force action
-- economic: Funding climate, budget cycles, macro pressure affecting spend
-- industry: Structural shifts — consolidation, new categories, platform changes
-- competitive: Category-level disruption creating urgency to act
+- regulatory: Legislation, compliance deadlines, policy shifts requiring strategic action
+- economic: Funding climate, macro pressure, sector-level budget cycles, financial stress
+- industry: Structural shifts — consolidation, new categories, platform changes, major analyst calls
+- competitive: Category-level disruption creating urgency to differentiate or respond
 
 ## Detection (news_search only — keep it simple)
 
-All hypotheses should use news_search. We search recent news to find evidence the macro condition is real.
+All hypotheses should use news_search. We search authoritative news and analyst sources to confirm the macro condition is real and current.
 
 ## Rules
 
 1. Generate exactly 3-5 hypotheses — fewer, broader is better than many narrow ones
-2. Each hypothesis must be a macro condition affecting MOST companies in the ICP, not a subset
-3. Write them as present-tense market conditions, not predictions
-4. No generic platitudes — ground each in the client's specific market and buyer
-5. Prefer the 2-3 signals with the STRONGEST buying intent connection over completeness
+2. Each must reflect a condition a CEO would bring to their board, not just a buying trigger
+3. Write as present-tense market conditions, not predictions
+4. Ground each in the specific market context of the client's ICP — no generic platitudes
+5. Prefer conditions already being actively reported in credible press right now
 
 For each hypothesis, provide:
-- hypothesis: 1-2 sentence statement of the macro condition and why it creates buying urgency
+- hypothesis: 1-2 sentence statement of the macro condition and why it creates strategic urgency
 - signalCategory: One of "regulatory", "economic", "industry", "competitive"
 - detectionMethod: "news_search"
 - affectedSegments: Which ICP segments this affects (keep broad)
 - priority: 1-10 (1 = highest, max 3 hypotheses at priority 1-3)
-- reasoning: One sentence on the buying intent mechanism
+- reasoning: One sentence on why this belongs on a board agenda, not just an ops meeting
 
 Return ONLY a valid JSON array:
 [
@@ -223,7 +237,7 @@ registerPrompt({
 
 export type SignalLevel = 'market' | 'company' | 'persona';
 export type SignalCategory =
-  | 'regulatory' | 'economic' | 'industry' | 'competitive'       // Market
+  | 'regulatory' | 'economic' | 'industry' | 'competitive' | 'social' // Market
   | 'funding' | 'hiring' | 'tech_adoption' | 'expansion' | 'leadership' | 'product_launch' // Company
   | 'job_change' | 'title_match' | 'seniority_match' | 'tenure_signal'; // Persona
 

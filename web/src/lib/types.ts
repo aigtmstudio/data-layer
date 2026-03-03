@@ -372,7 +372,7 @@ export interface ExportRequest {
 export type SignalLevel = 'market' | 'company' | 'persona';
 export type SignalCategory =
   // Market
-  | 'regulatory' | 'economic' | 'industry' | 'competitive'
+  | 'regulatory' | 'economic' | 'industry' | 'competitive' | 'social'
   // Company
   | 'funding' | 'hiring' | 'tech_adoption' | 'expansion' | 'leadership' | 'product_launch'
   // Persona
@@ -381,7 +381,7 @@ export type HypothesisStatus = 'active' | 'paused' | 'retired';
 export type HypothesisValidation = 'llm_generated' | 'human_validated' | 'human_created';
 
 export const SIGNAL_CATEGORIES_BY_LEVEL: Record<SignalLevel, SignalCategory[]> = {
-  market: ['regulatory', 'economic', 'industry', 'competitive'],
+  market: ['regulatory', 'economic', 'industry', 'competitive', 'social'],
   company: ['funding', 'hiring', 'tech_adoption', 'expansion', 'leadership', 'product_launch'],
   persona: ['job_change', 'title_match', 'seniority_match', 'tenure_signal'],
 };

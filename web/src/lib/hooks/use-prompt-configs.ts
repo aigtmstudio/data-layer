@@ -29,3 +29,11 @@ export function useResetPromptConfig() {
     onSuccess: () => qc.invalidateQueries({ queryKey: promptConfigKeys.all }),
   });
 }
+
+export function useDataSources() {
+  return useQuery({
+    queryKey: ['data-sources'],
+    queryFn: settingsApi.getDataSources,
+    staleTime: 5 * 60 * 1000,
+  });
+}

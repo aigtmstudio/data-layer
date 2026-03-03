@@ -1,9 +1,61 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { getDb, schema } from '../../db/index.js';
-import { eq, and, desc, sql, inArray, isNull, gte } from 'drizzle-orm';
+import { eq, and, desc, sql, inArray, isNull, gte, like } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
 import { computeTimelinessMultiplier } from './timeliness.js';
+
+// ── Source credibility tiers ──────────────────────────────────────────────────
+//
+// Executive teams are heavily influenced by authoritative sources. Signals from
+// major financial press and analyst firms carry much greater weight than unknown
+// blogs or social media. This multiplier is applied ONLY to the promotion decision
+// (which companies move from TAM to active_segment) — NOT to the stored
+// relevanceScore — so the buzz report is unaffected.
+
+const TIER_1_DOMAINS = new Set([
+  // Major financial press
+  'ft.com', 'bloomberg.com', 'wsj.com', 'reuters.com', 'economist.com',
+  // Analyst and advisory firms
+  'mckinsey.com', 'gartner.com', 'forrester.com', 'deloitte.com', 'bcg.com',
+  'pwc.com', 'bain.com', 'spglobal.com',
+  // Institutional / academic
+  'hbr.org', 'imf.org', 'worldbank.org', 'oecd.org',
+]);
+
+const TIER_2_DOMAINS = new Set([
+  'cnbc.com', 'axios.com', 'politico.com', 'politico.eu', 'theguardian.com',
+  'bbc.co.uk', 'bbc.com', 'thetimes.co.uk', 'telegraph.co.uk',
+  'businessinsider.com', 'techcrunch.com', 'wired.com', 'venturebeat.com',
+  'sifted.eu', 'theregister.com', 'arstechnica.com',
+]);
+
+// sourceName prefixes that indicate social/low-credibility signals
+const TWEET_SOURCE_PREFIX = 'exa_tweet_';
+
+/**
+ * Returns a multiplier (applied on top of the timeliness multiplier) reflecting
+ * the credibility of the signal's source domain. Higher-tier sources make it
+ * easier for a signal to cross the promotion threshold; tweet sources make it
+ * effectively impossible, since boards are not influenced by social media chatter.
+ */
+function computeSourceCredibilityMultiplier(
+  sourceUrl?: string | null,
+  sourceName?: string | null,
+): number {
+  // Tweets: very low weight for ICP promotion decisions
+  if (sourceName?.startsWith(TWEET_SOURCE_PREFIX)) return 0.5;
+
+  if (!sourceUrl) return 1.0;
+  try {
+    const hostname = new URL(sourceUrl).hostname.replace(/^www\./, '');
+    if (TIER_1_DOMAINS.has(hostname)) return 1.5;
+    if (TIER_2_DOMAINS.has(hostname)) return 1.15;
+  } catch {
+    // invalid URL — treat as default
+  }
+  return 1.0;
+}
 
 export const CLASSIFICATION_PROMPT = `You are a market signal classifier. Given a market signal (headline + summary) and a set of active hypotheses, determine:
 
@@ -38,6 +90,8 @@ export interface SignalFeedOptions {
   category?: string;
   processed?: boolean;
   hypothesisId?: string;
+  sourceName?: string; // exact match or prefix with trailing %
+  segment?: string; // ILIKE search on affectedSegments JSONB array
   limit?: number;
   offset?: number;
 }
@@ -168,9 +222,33 @@ export class MarketSignalProcessor {
     log.info({ count: unprocessed.length }, 'Found unprocessed signals');
     let processedCount = 0;
 
-    // Group signals by client for hypothesis lookup
+    // Pre-classify social signals (influencer posts, tweets) without LLM — they don't drive ICP promotion
+    const SOCIAL_PREFIXES = ['influencer_', 'exa_tweet_'];
+    const socialSignals = unprocessed.filter(s =>
+      s.sourceName && SOCIAL_PREFIXES.some(p => s.sourceName!.startsWith(p)),
+    );
+    const llmSignals = unprocessed.filter(s =>
+      !s.sourceName || !SOCIAL_PREFIXES.some(p => s.sourceName!.startsWith(p)),
+    );
+
+    if (socialSignals.length > 0) {
+      await db
+        .update(schema.marketSignals)
+        .set({
+          signalCategory: 'social',
+          relevanceScore: '0.40',
+          affectedSegments: [],
+          processed: true,
+          processedAt: new Date(),
+        })
+        .where(inArray(schema.marketSignals.id, socialSignals.map(s => s.id)));
+      processedCount += socialSignals.length;
+      log.info({ count: socialSignals.length }, 'Pre-classified social signals');
+    }
+
+    // Group remaining (non-social) signals by client for LLM classification
     const signalsByClient = new Map<string, typeof unprocessed>();
-    for (const signal of unprocessed) {
+    for (const signal of llmSignals) {
       const group = signalsByClient.get(signal.clientId) ?? [];
       group.push(signal);
       signalsByClient.set(signal.clientId, group);
@@ -231,7 +309,7 @@ export class MarketSignalProcessor {
               : null;
 
             // Validate category
-            const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
+            const validCategories = ['regulatory', 'economic', 'industry', 'competitive', 'social'] as const;
             const category = validCategories.includes(classification.signalCategory as typeof validCategories[number])
               ? classification.signalCategory as typeof validCategories[number]
               : null;
@@ -249,16 +327,19 @@ export class MarketSignalProcessor {
               })
               .where(eq(schema.marketSignals.id, signal.id));
 
-            // If high relevance AND recent, promote companies from TAM to active_segment
+            // If high relevance AND recent AND from a credible source, promote
+            // companies from TAM to active_segment.
             const { multiplier: timeMult, band: timeBand } = computeTimelinessMultiplier(signal.detectedAt);
-            const adjustedRelevance = classification.relevanceScore * timeMult;
+            const credibilityMult = computeSourceCredibilityMultiplier(signal.sourceUrl, signal.sourceName);
+            const adjustedRelevance = classification.relevanceScore * timeMult * credibilityMult;
 
             log.debug({
               signalId: signal.id,
               rawRelevance: classification.relevanceScore,
               timeliness: { multiplier: timeMult, band: timeBand },
+              credibility: { multiplier: credibilityMult, sourceUrl: signal.sourceUrl, sourceName: signal.sourceName },
               adjustedRelevance,
-            }, 'Timeliness-adjusted relevance');
+            }, 'Timeliness+credibility-adjusted relevance');
 
             if (adjustedRelevance >= 0.75 && classification.affectedSegments?.length > 0) {
               await this.promoteCompanies(
@@ -361,6 +442,7 @@ export class MarketSignalProcessor {
       economic: 'Economic',
       industry: 'Social and Technological',
       competitive: 'Technological and Economic',
+      social: 'Social and Cultural',
     };
     const primaryDimensions = pestleFocus[signalContext?.category ?? ''] ?? 'all dimensions';
 
@@ -438,16 +520,16 @@ export class MarketSignalProcessor {
 
     // Promote matched companies (or add signal records to already-active ones)
     for (const { company, confidence, pestleDimension, reasoning } of promotedCompanies) {
-      // Only update stage if company is still in TAM
-      if (company.pipelineStage === 'tam') {
-        await db
-          .update(schema.companies)
-          .set({
-            pipelineStage: 'active_segment',
-            updatedAt: new Date(),
-          })
-          .where(eq(schema.companies.id, company.id));
-      }
+      // Promote all list memberships that are still at 'tam' for this company.
+      // pipelineStage lives on listMembers (per-list) so each list tracks progression independently.
+      await db
+        .update(schema.listMembers)
+        .set({ pipelineStage: 'active_segment' })
+        .where(and(
+          eq(schema.listMembers.companyId, company.id),
+          isNull(schema.listMembers.removedAt),
+          eq(schema.listMembers.pipelineStage, 'tam'),
+        ));
 
       // Create company_signal record with LLM evidence
       await db
@@ -496,7 +578,7 @@ export class MarketSignalProcessor {
     const conditions = [eq(schema.marketSignals.clientId, options.clientId)];
 
     if (options.category) {
-      const validCategories = ['regulatory', 'economic', 'industry', 'competitive'] as const;
+      const validCategories = ['regulatory', 'economic', 'industry', 'competitive', 'social'] as const;
       if (validCategories.includes(options.category as typeof validCategories[number])) {
         conditions.push(eq(schema.marketSignals.signalCategory, options.category as typeof validCategories[number]));
       }
@@ -506,6 +588,18 @@ export class MarketSignalProcessor {
     }
     if (options.hypothesisId) {
       conditions.push(eq(schema.marketSignals.hypothesisId, options.hypothesisId));
+    }
+    if (options.sourceName) {
+      conditions.push(
+        options.sourceName.endsWith('%')
+          ? like(schema.marketSignals.sourceName, options.sourceName)
+          : eq(schema.marketSignals.sourceName, options.sourceName),
+      );
+    }
+    if (options.segment) {
+      conditions.push(
+        sql`${schema.marketSignals.affectedSegments}::text ILIKE ${'%' + options.segment + '%'}`,
+      );
     }
 
     const signals = await db

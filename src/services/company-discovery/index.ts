@@ -3,11 +3,17 @@ import type { SourceOrchestrator } from '../source-orchestrator/index.js';
 import type { EnrichmentPipeline } from '../enrichment/index.js';
 import type { CompanySearchParams, UnifiedCompany } from '../../providers/types.js';
 import type { IcpFilters, ProviderSearchHints } from '../../db/schema/icps.js';
+import type { SourceRecord } from '../../db/schema/companies.js';
 import { scoreCompanyFit } from '../icp-engine/scorer.js';
 import { getDb, schema } from '../../db/index.js';
 import { eq, and } from 'drizzle-orm';
 import { logger } from '../../lib/logger.js';
 import { registerPrompt, type PromptConfigService } from '../prompt-config/index.js';
+import type { TavilyProvider } from '../../providers/tavily/index.js';
+import type { ApifyProvider } from '../../providers/apify/index.js';
+import type { ExaProvider } from '../../providers/exa/index.js';
+import { mapGooglePlaceToCompany } from '../../providers/apify/mappers.js';
+import type { ListingPlatform } from '../../providers/apify/types.js';
 
 // Domains that are platforms/social sites, not actual companies.
 // Results with these domains are noise from search providers.
@@ -160,9 +166,26 @@ registerPrompt({
   defaultContent: AI_DISCOVERY_PROMPT,
 });
 
+export interface NewsDiscoveryResult {
+  articlesSearched: number;
+  companiesFound: number;
+  companiesAdded: number;
+  source: string;
+}
+
+export interface PlacesDiscoveryResult {
+  placesSearched: number;
+  companiesFound: number;
+  companiesAdded: number;
+  source: string;
+}
+
 export class CompanyDiscoveryService {
   private anthropic: Anthropic;
   private promptConfig?: PromptConfigService;
+  private tavilyProvider?: TavilyProvider;
+  private apifyProvider?: ApifyProvider;
+  private exaProvider?: ExaProvider;
 
   constructor(
     private orchestrator: SourceOrchestrator,
@@ -174,6 +197,419 @@ export class CompanyDiscoveryService {
 
   setPromptConfig(promptConfig: PromptConfigService) {
     this.promptConfig = promptConfig;
+  }
+
+  setTavilyProvider(provider: TavilyProvider) {
+    this.tavilyProvider = provider;
+  }
+
+  setApifyProvider(provider: ApifyProvider) {
+    this.apifyProvider = provider;
+  }
+
+  setExaProvider(provider: ExaProvider) {
+    this.exaProvider = provider;
+  }
+
+  /**
+   * Discover companies from local news articles (new openings, expansions, refurbishments).
+   * Uses Tavily to search news and LLM to extract business names from articles.
+   */
+  async discoverFromNews(params: {
+    clientId: string;
+    queries: string[];
+    limit?: number;
+  }): Promise<NewsDiscoveryResult> {
+    if (!this.tavilyProvider) {
+      throw new Error('Tavily provider not configured');
+    }
+
+    const result: NewsDiscoveryResult = { articlesSearched: 0, companiesFound: 0, companiesAdded: 0, source: 'news_discovery' };
+    const log = logger.child({ clientId: params.clientId, service: 'company-discovery', method: 'news' });
+
+    // Pre-load existing domains for dedup
+    const existing = await getDb()
+      .select({ domain: schema.companies.domain, name: schema.companies.name })
+      .from(schema.companies)
+      .where(eq(schema.companies.clientId, params.clientId));
+    const existingDomains = new Set(existing.map(c => c.domain).filter(Boolean).map(d => d!.toLowerCase()));
+    const existingNames = new Set(existing.map(c => c.name.toLowerCase()));
+
+    const allArticles: Array<{ title: string; content: string; url: string }> = [];
+
+    for (const query of params.queries) {
+      try {
+        const response = await this.tavilyProvider.searchNews({ query, maxResults: 5, days: 30 });
+        if (response.results?.length) {
+          allArticles.push(...response.results.map(r => ({
+            title: r.title ?? query,
+            content: r.content?.slice(0, 500) ?? '',
+            url: r.url ?? '',
+          })));
+          result.articlesSearched += response.results.length;
+        }
+      } catch (err) {
+        log.warn({ query, err }, 'Tavily news search failed');
+      }
+    }
+
+    if (allArticles.length === 0) return result;
+
+    // LLM extraction: extract business names from articles
+    const articleSummary = allArticles
+      .slice(0, 20)
+      .map(a => `Title: ${a.title}\nExcerpt: ${a.content}`)
+      .join('\n---\n');
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: `Extract real business names from these news articles. Focus on restaurants, hospitality venues, or food service businesses that are opening, expanding, or refurbishing.\n\nArticles:\n${articleSummary}\n\nReturn ONLY a valid JSON array of objects: [{"name": "Restaurant Name", "website": "example.com", "city": "London", "description": "one sentence"}]\nOmit website/city if unknown. Return [] if none found.`,
+        }],
+      });
+
+      const text = response.content.find(b => b.type === 'text')?.text ?? '';
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return result;
+
+      const extracted = JSON.parse(jsonMatch[0]) as Array<{ name: string; website?: string; city?: string; description?: string }>;
+      result.companiesFound = extracted.length;
+
+      for (const business of extracted.slice(0, params.limit ?? 50)) {
+        if (!business.name) continue;
+        if (existingNames.has(business.name.toLowerCase())) continue;
+        if (business.website && existingDomains.has(business.website.toLowerCase())) continue;
+
+        const company: UnifiedCompany = {
+          name: business.name,
+          domain: business.website,
+          websiteUrl: business.website ? `https://${business.website}` : undefined,
+          city: business.city,
+          description: business.description,
+          industry: 'Restaurant',
+          externalIds: {},
+        };
+
+        await this.upsertDiscoveredCompanyWithSource(params.clientId, company, 'news_discovery');
+        if (business.website) existingDomains.add(business.website.toLowerCase());
+        existingNames.add(business.name.toLowerCase());
+        result.companiesAdded++;
+      }
+    } catch (err) {
+      log.error({ err }, 'LLM extraction from news articles failed');
+    }
+
+    log.info(result, 'News-based company discovery complete');
+    return result;
+  }
+
+  /**
+   * Discover companies from Google Places.
+   */
+  async discoverFromGooglePlaces(params: {
+    clientId: string;
+    query: string;
+    location: string;
+    limit?: number;
+  }): Promise<PlacesDiscoveryResult> {
+    if (!this.apifyProvider) {
+      throw new Error('Apify provider not configured');
+    }
+
+    const result: PlacesDiscoveryResult = { placesSearched: 0, companiesFound: 0, companiesAdded: 0, source: 'google_places' };
+    const log = logger.child({ clientId: params.clientId, service: 'company-discovery', method: 'google_places' });
+
+    const existing = await getDb()
+      .select({ domain: schema.companies.domain })
+      .from(schema.companies)
+      .where(eq(schema.companies.clientId, params.clientId));
+    const existingDomains = new Set(existing.map(c => c.domain).filter(Boolean).map(d => d!.toLowerCase()));
+
+    const places = await this.apifyProvider.searchGooglePlaces({
+      query: params.query,
+      location: params.location,
+      limit: params.limit ?? 50,
+    });
+    result.placesSearched = places.length;
+
+    for (const place of places) {
+      const company = mapGooglePlaceToCompany(place);
+      if (!company.name || company.name === 'Unknown') continue;
+      if (company.domain && existingDomains.has(company.domain.toLowerCase())) continue;
+
+      await this.upsertDiscoveredCompanyWithSource(params.clientId, company, 'google_places');
+      if (company.domain) existingDomains.add(company.domain.toLowerCase());
+      result.companiesAdded++;
+    }
+
+    result.companiesFound = result.companiesAdded;
+    log.info(result, 'Google Places discovery complete');
+    return result;
+  }
+
+  /**
+   * Discover companies with negative payment/checkout reviews via Google Places reviews.
+   */
+  async discoverFromReviews(params: {
+    clientId: string;
+    location: string;
+    category?: string;
+    limit?: number;
+  }): Promise<PlacesDiscoveryResult> {
+    if (!this.apifyProvider) {
+      throw new Error('Apify provider not configured');
+    }
+
+    const result: PlacesDiscoveryResult = { placesSearched: 0, companiesFound: 0, companiesAdded: 0, source: 'review_discovery' };
+    const log = logger.child({ clientId: params.clientId, service: 'company-discovery', method: 'reviews' });
+
+    const existing = await getDb()
+      .select({ domain: schema.companies.domain, name: schema.companies.name })
+      .from(schema.companies)
+      .where(eq(schema.companies.clientId, params.clientId));
+    const existingDomains = new Set(existing.map(c => c.domain).filter(Boolean).map(d => d!.toLowerCase()));
+    const existingNames = new Set(existing.map(c => c.name.toLowerCase()));
+
+    const places = await this.apifyProvider.searchGooglePlaces({
+      query: params.category ?? 'restaurant',
+      location: params.location,
+      limit: params.limit ?? 100,
+      includeReviews: true,
+    });
+    result.placesSearched = places.length;
+
+    // LLM analysis: identify businesses with payment/checkout complaints
+    const placesWithReviews = places
+      .filter(p => p.reviews && p.reviews.length > 0)
+      .slice(0, 50);
+
+    if (placesWithReviews.length === 0) return result;
+
+    const reviewSummary = placesWithReviews.map(p => ({
+      name: p.title,
+      reviews: p.reviews?.filter(r => r.stars && r.stars <= 3).map(r => r.text).slice(0, 3),
+    })).filter(p => p.reviews && p.reviews.length > 0);
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        messages: [{
+          role: 'user',
+          content: `Identify businesses from this list that have negative reviews specifically about payment processing, card machines, card payments, checkout, or billing issues.\n\n${JSON.stringify(reviewSummary, null, 2)}\n\nReturn ONLY a JSON array of business names: ["Restaurant A", "Café B"]. Return [] if none found.`,
+        }],
+      });
+
+      const text = response.content.find(b => b.type === 'text')?.text ?? '';
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return result;
+
+      const matchedNames = new Set((JSON.parse(jsonMatch[0]) as string[]).map(n => n.toLowerCase()));
+
+      for (const place of placesWithReviews) {
+        if (!place.title || !matchedNames.has(place.title.toLowerCase())) continue;
+        if (existingNames.has(place.title.toLowerCase())) continue;
+
+        const company = mapGooglePlaceToCompany(place);
+        if (company.domain && existingDomains.has(company.domain.toLowerCase())) continue;
+
+        await this.upsertDiscoveredCompanyWithSource(params.clientId, company, 'review_discovery');
+        if (company.domain) existingDomains.add(company.domain.toLowerCase());
+        existingNames.add(place.title.toLowerCase());
+        result.companiesAdded++;
+      }
+
+      result.companiesFound = matchedNames.size;
+    } catch (err) {
+      log.error({ err }, 'LLM review analysis failed');
+    }
+
+    log.info(result, 'Review-based company discovery complete');
+    return result;
+  }
+
+  /**
+   * Discover companies from delivery/booking platform listings.
+   * Uses Exa domain-scoped search (site:just-eat.co.uk, site:ubereats.com, etc.)
+   * rather than brittle platform-specific scrapers.
+   */
+  async discoverFromListings(params: {
+    clientId: string;
+    platform: ListingPlatform;
+    location: string;
+    limit?: number;
+  }): Promise<PlacesDiscoveryResult> {
+    if (!this.exaProvider) {
+      throw new Error('Exa provider not configured — required for listing discovery');
+    }
+
+    const PLATFORM_DOMAINS: Record<ListingPlatform, string[]> = {
+      opentable: ['opentable.co.uk', 'opentable.com'],
+      ubereats: ['ubereats.com'],
+      justeat: ['just-eat.co.uk'],
+    };
+
+    const result: PlacesDiscoveryResult = { placesSearched: 0, companiesFound: 0, companiesAdded: 0, source: `listing_discovery_${params.platform}` };
+    const log = logger.child({ clientId: params.clientId, service: 'company-discovery', method: 'listings', platform: params.platform });
+
+    const targetLimit = params.limit ?? 50;
+
+    // Dedup by name (these listing pages don't have the restaurant's own domain)
+    const existing = await getDb()
+      .select({ name: schema.companies.name })
+      .from(schema.companies)
+      .where(eq(schema.companies.clientId, params.clientId));
+    const existingNames = new Set(existing.map(c => c.name?.toLowerCase().trim()).filter(Boolean) as string[]);
+
+    const domains = PLATFORM_DOMAINS[params.platform];
+    const loc = params.location;
+
+    // Query pool: cuisine-type variations let us fan out beyond a single "restaurants" search.
+    // Each query typically returns 15–30 unique venues so we generate enough to cover the target.
+    const QUERY_POOL = [
+      `restaurants in ${loc}`,
+      `Indian restaurant in ${loc}`,
+      `Chinese restaurant in ${loc}`,
+      `Italian restaurant in ${loc}`,
+      `Japanese restaurant in ${loc}`,
+      `Thai restaurant in ${loc}`,
+      `Mexican restaurant in ${loc}`,
+      `Turkish restaurant in ${loc}`,
+      `pizza restaurant in ${loc}`,
+      `burger restaurant in ${loc}`,
+      `sushi restaurant in ${loc}`,
+      `cafe coffee shop in ${loc}`,
+      `pub food in ${loc}`,
+      `fast food takeaway in ${loc}`,
+      `brunch restaurant in ${loc}`,
+      `French restaurant in ${loc}`,
+      `Greek restaurant in ${loc}`,
+      `Spanish restaurant in ${loc}`,
+      `Vietnamese restaurant in ${loc}`,
+      `Korean restaurant in ${loc}`,
+    ];
+
+    // Fetch ~30 per query. Generate enough queries to (likely) fill the quota given dedup waste.
+    const BATCH_SIZE = 30;
+    const numQueries = Math.min(Math.ceil(targetLimit / BATCH_SIZE) + 1, QUERY_POOL.length);
+    const queries = QUERY_POOL.slice(0, numQueries);
+
+    log.info({ targetLimit, numQueries, platform: params.platform, location: loc }, 'Starting listing discovery');
+
+    for (const query of queries) {
+      if (result.companiesAdded >= targetLimit) break;
+
+      const fetchSize = Math.min(BATCH_SIZE, targetLimit - result.companiesAdded + 10);
+
+      try {
+        const rawResults = await this.exaProvider.searchWithDomains(query, domains, fetchSize);
+        result.placesSearched += rawResults.length;
+
+        for (const r of rawResults) {
+          if (result.companiesAdded >= targetLimit) break;
+          if (!r.title) continue;
+          // Strip platform suffix: "Wagamama - Just Eat" → "Wagamama", "Pizza Express | Uber Eats" → "Pizza Express"
+          const name = r.title.split(/\s*[-|]\s*/)[0].trim();
+          if (!name || name.length < 2) continue;
+          if (existingNames.has(name.toLowerCase())) continue;
+
+          const company: UnifiedCompany = {
+            name,
+            websiteUrl: r.url,
+            city: loc,
+            industry: 'Restaurant',
+            externalIds: { [`listing_${params.platform}`]: r.url },
+          };
+
+          await this.upsertDiscoveredCompanyWithSource(params.clientId, company, result.source);
+          existingNames.add(name.toLowerCase());
+          result.companiesAdded++;
+        }
+      } catch (err) {
+        log.warn({ query, err }, 'Exa listing search failed for query — continuing');
+      }
+    }
+
+    result.companiesFound = result.companiesAdded;
+    log.info(result, 'Listing-based company discovery complete (Exa domain search)');
+    return result;
+  }
+
+  /**
+   * Upsert a discovered company with a named source string.
+   * Delegates to the existing upsertDiscoveredCompany logic but accepts a source label.
+   */
+  private async upsertDiscoveredCompanyWithSource(
+    clientId: string,
+    data: UnifiedCompany,
+    source: string,
+  ): Promise<{ id: string }> {
+    // Tag the externalId so upsertDiscoveredCompany picks up the right source name
+    const tagged: UnifiedCompany = {
+      ...data,
+      externalIds: { ...data.externalIds, [source]: data.domain ?? data.name ?? 'discovered' },
+    };
+    return this.upsertDiscoveredCompanyTagged(clientId, tagged, source);
+  }
+
+  private async upsertDiscoveredCompanyTagged(
+    clientId: string,
+    data: UnifiedCompany,
+    source: string,
+  ): Promise<{ id: string }> {
+    const db = getDb();
+    const now = new Date();
+
+    const dbFields = {
+      name: data.name,
+      domain: data.domain,
+      linkedinUrl: data.linkedinUrl,
+      websiteUrl: data.websiteUrl,
+      industry: data.industry,
+      employeeCount: data.employeeCount,
+      employeeRange: data.employeeRange,
+      city: data.city,
+      state: data.state,
+      country: data.country,
+      address: data.address,
+      description: data.description,
+      phone: data.phone,
+      techStack: [] as string[],
+      sources: [{ source, fetchedAt: now.toISOString(), fieldsProvided: [] }] as SourceRecord[],
+      primarySource: source,
+      updatedAt: now,
+    };
+
+    if (data.domain) {
+      const existing = await db
+        .select({ id: schema.companies.id, sources: schema.companies.sources })
+        .from(schema.companies)
+        .where(and(eq(schema.companies.clientId, clientId), eq(schema.companies.domain, data.domain)))
+        .limit(1);
+
+      if (existing.length > 0) {
+        const existingSources: SourceRecord[] = (existing[0].sources as SourceRecord[] | null) ?? [];
+        if (!existingSources.some(s => s.source === source)) {
+          const newSource: SourceRecord = { source, fetchedAt: now.toISOString(), fieldsProvided: [] };
+          await db.update(schema.companies)
+            .set({
+              sources: [...existingSources, newSource],
+              updatedAt: now,
+            })
+            .where(eq(schema.companies.id, existing[0].id));
+        }
+        return existing[0];
+      }
+    }
+
+    const [inserted] = await db
+      .insert(schema.companies)
+      .values({ clientId, pipelineStage: 'tam', ...dbFields })
+      .returning({ id: schema.companies.id });
+    return inserted;
   }
 
   async discoverAndPopulate(params: {

@@ -30,8 +30,9 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Input } from '@/components/ui/input';
 import { formatRelativeTime } from '@/lib/utils';
-import { Radio, RefreshCw, ExternalLink, Sparkles, MoreHorizontal, Pause, PlayCircle, Trash2, Building, UserCircle, Search } from 'lucide-react';
+import { Radio, RefreshCw, ExternalLink, Sparkles, MoreHorizontal, Pause, PlayCircle, Trash2, Building, UserCircle, Search, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -44,6 +45,7 @@ const categoryColors: Record<string, string> = {
   economic: 'bg-blue-100 text-blue-700',
   industry: 'bg-purple-100 text-purple-700',
   competitive: 'bg-orange-100 text-orange-700',
+  social: 'bg-yellow-100 text-yellow-700',
   // Company
   funding: 'bg-green-100 text-green-700',
   hiring: 'bg-sky-100 text-sky-700',
@@ -248,6 +250,7 @@ function HypothesesSection({
 function MarketSignalFeed({ clientId }: { clientId: string }) {
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [processedFilter, setProcessedFilter] = useState<string>('all');
+  const [segmentFilter, setSegmentFilter] = useState<string>('');
   const [selectedSignal, setSelectedSignal] = useState<MarketSignal | null>(null);
   const processSignals = useProcessSignals();
   const searchEvidence = useSearchEvidence();
@@ -255,6 +258,7 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
   const { data, isLoading, isError, refetch } = useMarketSignals(clientId, {
     category: categoryFilter !== 'all' ? categoryFilter : undefined,
     processed: processedFilter !== 'all' ? processedFilter === 'true' : undefined,
+    segment: segmentFilter || undefined,
     limit: 100,
   });
 
@@ -312,6 +316,33 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
           : '-',
     },
     {
+      accessorKey: 'affectedSegments',
+      header: 'Segments',
+      cell: ({ row }) => {
+        const segs = row.original.affectedSegments ?? [];
+        if (segs.length === 0) return <span className="text-muted-foreground text-xs">—</span>;
+        const visible = segs.slice(0, 2);
+        const extra = segs.length - 2;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {visible.map((seg) => (
+              <button
+                key={seg}
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setSegmentFilter(seg); }}
+                className="text-xs px-1.5 py-0.5 rounded bg-muted hover:bg-muted/80 text-muted-foreground cursor-pointer"
+              >
+                {seg}
+              </button>
+            ))}
+            {extra > 0 && (
+              <span className="text-xs text-muted-foreground">+{extra}</span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
       accessorKey: 'processed',
       header: 'Status',
       cell: ({ row }) => (
@@ -365,7 +396,7 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
         </Card>
       </div>
 
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <Select value={categoryFilter} onValueChange={setCategoryFilter}>
           <SelectTrigger className="w-[160px]"><SelectValue placeholder="Category" /></SelectTrigger>
           <SelectContent>
@@ -374,6 +405,7 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
             <SelectItem value="economic">Economic</SelectItem>
             <SelectItem value="industry">Industry</SelectItem>
             <SelectItem value="competitive">Competitive</SelectItem>
+            <SelectItem value="social">Social</SelectItem>
           </SelectContent>
         </Select>
         <Select value={processedFilter} onValueChange={setProcessedFilter}>
@@ -384,6 +416,23 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
             <SelectItem value="false">Pending</SelectItem>
           </SelectContent>
         </Select>
+        <div className="relative flex items-center">
+          <Input
+            placeholder="Filter by segment..."
+            value={segmentFilter}
+            onChange={(e) => setSegmentFilter(e.target.value)}
+            className="w-[200px] pr-7 h-9 text-sm"
+          />
+          {segmentFilter && (
+            <button
+              type="button"
+              onClick={() => setSegmentFilter('')}
+              className="absolute right-2 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
 
       {isLoading ? (
@@ -439,7 +488,14 @@ function MarketSignalFeed({ clientId }: { clientId: string }) {
                   <p className="text-sm font-medium text-muted-foreground mb-1">Affected Segments</p>
                   <div className="flex flex-wrap gap-1">
                     {selectedSignal.affectedSegments.map((seg) => (
-                      <Badge key={seg} variant="secondary" className="text-xs">{seg}</Badge>
+                      <button
+                        key={seg}
+                        type="button"
+                        onClick={() => { setSegmentFilter(seg); setSelectedSignal(null); }}
+                        className="text-xs px-2 py-0.5 rounded-full bg-secondary text-secondary-foreground hover:bg-secondary/80 cursor-pointer"
+                      >
+                        {seg}
+                      </button>
                     ))}
                   </div>
                 </div>

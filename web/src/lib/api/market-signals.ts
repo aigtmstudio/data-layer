@@ -3,12 +3,14 @@ import type { MarketSignal, ApiResponse } from '../types';
 
 export async function getMarketSignals(
   clientId: string,
-  filters?: { category?: string; processed?: boolean; hypothesisId?: string; limit?: number; offset?: number },
+  filters?: { category?: string; processed?: boolean; hypothesisId?: string; sourceName?: string; segment?: string; limit?: number; offset?: number },
 ): Promise<{ signals: MarketSignal[]; total: number }> {
   const query = new URLSearchParams({ clientId });
   if (filters?.category) query.set('category', filters.category);
   if (filters?.processed !== undefined) query.set('processed', String(filters.processed));
   if (filters?.hypothesisId) query.set('hypothesisId', filters.hypothesisId);
+  if (filters?.sourceName) query.set('sourceName', filters.sourceName);
+  if (filters?.segment) query.set('segment', filters.segment);
   if (filters?.limit) query.set('limit', String(filters.limit));
   if (filters?.offset) query.set('offset', String(filters.offset));
   const res = await apiClient.get<{ data: MarketSignal[]; total: number }>(`/api/market-signals?${query}`);

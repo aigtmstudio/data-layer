@@ -8,7 +8,7 @@ export const signalKeys = {
 
 export function useMarketSignals(
   clientId: string | null,
-  filters?: { category?: string; processed?: boolean; limit?: number; offset?: number },
+  filters?: { category?: string; processed?: boolean; sourceName?: string; segment?: string; limit?: number; offset?: number },
 ) {
   return useQuery({
     queryKey: [...signalKeys.all(clientId!), filters],

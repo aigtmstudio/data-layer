@@ -217,44 +217,9 @@ export class ListBuilder {
         }
       }
 
-      // Batch-load existing signals
+      // Load existing signals only — new signal detection is a separate user-triggered step.
       const companyIds = scored.map(s => s.company.id);
       const existingSignals = await this.signalDetector!.getSignalsForCompanies(params.clientId, companyIds);
-
-      // Detect signals for companies that don't have any yet (parallel, concurrency of 5)
-      const needsDetection = scored.filter(s => !existingSignals.has(s.company.id));
-      const SIGNAL_CONCURRENCY = 5;
-      for (let si = 0; si < needsDetection.length; si += SIGNAL_CONCURRENCY) {
-        const batch = needsDetection.slice(si, si + SIGNAL_CONCURRENCY);
-        const results = await Promise.allSettled(
-          batch.map(async ({ company }) => {
-            const companyData: UnifiedCompany = {
-              name: company.name,
-              domain: company.domain ?? undefined,
-              industry: company.industry ?? undefined,
-              description: company.description ?? undefined,
-              employeeCount: company.employeeCount ?? undefined,
-              employeeRange: company.employeeRange ?? undefined,
-              techStack: (company.techStack as string[]) ?? [],
-              latestFundingStage: company.latestFundingStage ?? undefined,
-              totalFunding: company.totalFunding != null ? Number(company.totalFunding) : undefined,
-              country: company.country ?? undefined,
-              externalIds: {},
-            };
-
-            const signals = await this.signalDetector!.detectSignals(
-              params.clientId, companyData, company.id, clientContext,
-            );
-            return { companyId: company.id, signals };
-          }),
-        );
-
-        for (const settled of results) {
-          if (settled.status === 'fulfilled') {
-            existingSignals.set(settled.value.companyId, settled.value.signals);
-          }
-        }
-      }
 
       const signalCounts = { withSignals: 0, without: 0 };
 
@@ -327,6 +292,7 @@ export class ListBuilder {
         .values({
           listId: params.listId,
           companyId: company.id,
+          pipelineStage: 'tam',
           icpFitScore: String(icpFitScore),
           signalScore: String(signalScore),
           intelligenceScore: String(intelligenceScore),
@@ -548,29 +514,28 @@ export class ListBuilder {
     const [list] = await db.select().from(schema.lists).where(eq(schema.lists.id, listId));
     if (!list) throw new NotFoundError('List', listId);
 
-    // Reset previously-qualified companies back to active_segment for re-evaluation
+    // Reset previously-qualified members in THIS list back to active_segment for re-evaluation
     const qualifiedToReset = await db
-      .select({ companyId: schema.listMembers.companyId })
+      .select({ memberId: schema.listMembers.id })
       .from(schema.listMembers)
-      .innerJoin(schema.companies, eq(schema.listMembers.companyId, schema.companies.id))
       .where(and(
         eq(schema.listMembers.listId, listId),
         isNull(schema.listMembers.removedAt),
-        eq(schema.companies.pipelineStage, 'qualified'),
+        eq(schema.listMembers.pipelineStage, 'qualified'),
       ));
 
     if (qualifiedToReset.length > 0) {
-      const resetIds = qualifiedToReset.map(m => m.companyId).filter((id): id is string => id !== null);
+      const resetIds = qualifiedToReset.map(m => m.memberId).filter((id): id is string => id !== null);
       if (resetIds.length > 0) {
         await db
-          .update(schema.companies)
-          .set({ pipelineStage: 'active_segment', updatedAt: new Date() })
-          .where(inArray(schema.companies.id, resetIds));
-        logger.info({ listId, count: resetIds.length }, 'Reset qualified companies to active_segment for re-evaluation');
+          .update(schema.listMembers)
+          .set({ pipelineStage: 'active_segment' })
+          .where(inArray(schema.listMembers.id, resetIds));
+        logger.info({ listId, count: resetIds.length }, 'Reset qualified members to active_segment for re-evaluation');
       }
     }
 
-    // Load list members whose company is at active_segment
+    // Load list members at active_segment in THIS list
     const activeMembers = await db
       .select({
         memberId: schema.listMembers.id,
@@ -582,7 +547,7 @@ export class ListBuilder {
       .where(and(
         eq(schema.listMembers.listId, listId),
         isNull(schema.listMembers.removedAt),
-        eq(schema.companies.pipelineStage, 'active_segment'),
+        eq(schema.listMembers.pipelineStage, 'active_segment'),
         gte(schema.listMembers.icpFitScore, '0.65'),
       ));
 
@@ -684,13 +649,13 @@ export class ListBuilder {
             })
             .where(eq(schema.listMembers.id, member.memberId));
 
-          return { signals, scoreResult, companyId: company.id };
+          return { signals, scoreResult, memberId: member.memberId };
         }),
       );
 
       for (const settled of results) {
         if (settled.status === 'fulfilled') {
-          const { signals, scoreResult, companyId } = settled.value;
+          const { signals, scoreResult, memberId } = settled.value;
           totalSignals += signals.length;
 
           // Apply timeliness multiplier: old/undated signals get heavily penalized
@@ -701,7 +666,7 @@ export class ListBuilder {
           const hasVeryStrong = adjustedSignals.some(s => s.adjustedStrength >= 0.85);
           const hasMultipleStrong = adjustedSignals.filter(s => s.adjustedStrength >= 0.7).length >= 2;
           if (hasVeryStrong || hasMultipleStrong) {
-            companyIdsToQualify.push(companyId);
+            companyIdsToQualify.push(memberId);
             qualified++;
           }
         } else {
@@ -710,15 +675,12 @@ export class ListBuilder {
       }
     }
 
-    // Batch-promote qualifying companies to 'qualified'
+    // Batch-promote qualifying list members to 'qualified' (scoped to THIS list)
     if (companyIdsToQualify.length > 0) {
       await db
-        .update(schema.companies)
-        .set({
-          pipelineStage: 'qualified',
-          updatedAt: new Date(),
-        })
-        .where(inArray(schema.companies.id, companyIdsToQualify));
+        .update(schema.listMembers)
+        .set({ pipelineStage: 'qualified' })
+        .where(inArray(schema.listMembers.id, companyIdsToQualify));
     }
 
     logger.info(
@@ -769,7 +731,7 @@ export class ListBuilder {
       .where(and(
         eq(schema.listMembers.listId, params.sourceListId),
         isNull(schema.listMembers.removedAt),
-        eq(schema.companies.pipelineStage, 'qualified'),
+        eq(schema.listMembers.pipelineStage, 'qualified'),
       ));
 
     if (qualifiedMembers.length === 0) {

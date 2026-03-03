@@ -9,7 +9,7 @@ import type {
   PaginatedResponse,
 } from '../types.js';
 import { mapExaResultToCompany } from './mappers.js';
-import type { ExaSearchResponse } from './types.js';
+import type { ExaSearchResponse, ExaSearchResult } from './types.js';
 
 export class ExaProvider extends BaseProvider implements DataProvider {
   readonly name = 'exa';
@@ -121,6 +121,22 @@ export class ExaProvider extends BaseProvider implements DataProvider {
         creditsConsumed: 0, fieldsPopulated: [], qualityScore: 0,
       };
     }
+  }
+
+  /**
+   * Search within specific domains (e.g. just-eat.co.uk, ubereats.com).
+   * Used for platform listing discovery without relying on scraper actors.
+   */
+  async searchWithDomains(query: string, includeDomains: string[], numResults: number): Promise<ExaSearchResult[]> {
+    const body: Record<string, unknown> = {
+      query,
+      numResults: Math.min(numResults, 100),
+      type: 'auto',
+      includeDomains,
+      contents: { text: { maxCharacters: 500 } },
+    };
+    const raw = await this.request<ExaSearchResponse>('post', '/search', { body });
+    return raw.results;
   }
 
   /**

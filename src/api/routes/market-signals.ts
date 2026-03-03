@@ -43,6 +43,8 @@ export const marketSignalRoutes: FastifyPluginAsync<{ container: ServiceContaine
       category?: string;
       processed?: string;
       hypothesisId?: string;
+      sourceName?: string;
+      segment?: string;
       limit?: string;
       offset?: string;
     };
@@ -55,6 +57,8 @@ export const marketSignalRoutes: FastifyPluginAsync<{ container: ServiceContaine
       category: request.query.category,
       processed: request.query.processed !== undefined ? request.query.processed === 'true' : undefined,
       hypothesisId: request.query.hypothesisId,
+      sourceName: request.query.sourceName,
+      segment: request.query.segment,
       limit: request.query.limit ? parseInt(request.query.limit) : undefined,
       offset: request.query.offset ? parseInt(request.query.offset) : undefined,
     });
@@ -140,6 +144,67 @@ export const marketSignalRoutes: FastifyPluginAsync<{ container: ServiceContaine
       })
       .catch(async (error) => {
         log.error({ error }, 'Evidence search failed');
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'failed',
+            completedAt: new Date(),
+            updatedAt: new Date(),
+            errors: [{ item: body.clientId, error: String(error), timestamp: new Date().toISOString() }],
+          })
+          .where(eq(schema.jobs.id, job.id));
+      });
+  });
+
+  // POST /api/market-signals/search-social — search social media platforms for signals
+  app.post('/search-social', async (request, reply) => {
+    const body = z.object({
+      clientId: z.string().uuid(),
+      platforms: z.array(z.enum(['instagram', 'twitter', 'youtube', 'reddit', 'linkedin'])).optional(),
+      postsPerPlatform: z.number().int().min(1).max(100).optional(),
+    }).parse(request.body);
+
+    if (!opts.container.marketSignalSearcher) {
+      return reply.status(503).send({ error: 'Market signal searcher not configured' });
+    }
+
+    const db = getDb();
+    const log = logger.child({ clientId: body.clientId });
+    log.info('Social media search triggered');
+
+    const [job] = await db
+      .insert(schema.jobs)
+      .values({
+        clientId: body.clientId,
+        type: 'social_signal_search',
+        status: 'running',
+        input: { platforms: body.platforms, postsPerPlatform: body.postsPerPlatform },
+      })
+      .returning();
+
+    reply.status(202).send({ data: { jobId: job.id, message: 'Social media search started' } });
+
+    withLlmContext({ clientId: body.clientId, jobId: job.id }, () =>
+      opts.container.marketSignalSearcher!
+        .searchSocialMedia(body.clientId, {
+          platforms: body.platforms as ('instagram' | 'twitter' | 'youtube' | 'reddit' | 'linkedin')[] | undefined,
+          postsPerPlatform: body.postsPerPlatform,
+        })
+    ).then(async (result) => {
+        await db
+          .update(schema.jobs)
+          .set({
+            status: 'completed',
+            processedItems: result.signalsIngested,
+            output: result as unknown as Record<string, unknown>,
+            completedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jobs.id, job.id));
+        log.info(result, 'Social media search complete');
+      })
+      .catch(async (error) => {
+        log.error({ error }, 'Social media search failed');
         await db
           .update(schema.jobs)
           .set({

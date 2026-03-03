@@ -78,52 +78,119 @@ export interface InstagramPost {
 
 export interface Tweet {
   id?: string;
-  url?: string;
-  full_text?: string;
   text?: string;
-  created_at?: string;
-  author?: { userName?: string; name?: string };
-  replyCount?: number;
-  retweetCount?: number;
+  full_text?: string;
+  url?: string;
+  tweetUrl?: string;
+  // author field variants
+  author?: {
+    username?: string;
+    name?: string;
+    followers?: number;
+    followersCount?: number;
+  };
+  user?: {
+    screen_name?: string;
+    name?: string;
+    followers_count?: number;
+  };
+  // engagement field variants
   likeCount?: number;
+  favorite_count?: number;
+  retweetCount?: number;
+  retweet_count?: number;
+  replyCount?: number;
+  reply_count?: number;
   viewCount?: number;
+  // date field variants
+  createdAt?: string;
+  created_at?: string;
 }
 
 export interface YouTubeVideo {
+  // id field variants
   id?: string;
-  url?: string;
+  videoId?: string;
   title?: string;
+  // description field variants
   description?: string;
-  date?: string;
+  text?: string;
+  // url field variants
+  url?: string;
+  link?: string;
+  // channel field variants
   channelName?: string;
+  channelTitle?: string;
+  author?: string;
   channelUrl?: string;
-  likes?: number;
-  comments?: number;
-  views?: number;
+  // engagement field variants (actor sometimes returns strings)
+  viewCount?: number | string;
+  views?: number | string;
+  likeCount?: number | string;
+  likes?: number | string;
+  commentCount?: number | string;
+  comments?: number | string;
+  // date field variants
+  publishedAt?: string;
+  uploadDate?: string;
+  date?: string;
+  duration?: string;
 }
 
 export interface RedditPost {
   id?: string;
-  url?: string;
   title?: string;
+  // body field variants
+  body?: string;
   text?: string;
   selftext?: string;
-  created_utc?: number;
-  author?: string;
+  // subreddit field variants
+  subreddit?: string;
+  communityName?: string;
+  // url field variants
+  url?: string;
+  postUrl?: string;
+  // score/upvote field variants
   score?: number;
-  num_comments?: number;
+  upvotes?: number;
+  // comment count field variants
+  numberOfComments?: number;
+  numComments?: number;
+  commentsCount?: number;
+  // date field variants
+  createdAt?: string;
+  createdUtc?: number;
+  created_utc?: number;
+  // author field variants
+  author?: string;
+  username?: string;
 }
 
+// harvestapi/linkedin-post-search output schema
 export interface LinkedInPost {
+  type?: string;
   id?: string;
-  url?: string;
-  text?: string;
-  postedAt?: string;
-  authorName?: string;
-  authorHandle?: string;
-  likesCount?: number;
-  commentsCount?: number;
-  sharesCount?: number;
+  linkedinUrl?: string;
+  content?: string;
+  author?: {
+    universalName?: string;
+    name?: string;
+    linkedinUrl?: string;
+    info?: string; // headline/title
+  };
+  postedAt?: {
+    timestamp?: number;
+    date?: string;
+    postedAgoText?: string;
+  };
+  engagement?: {
+    likes?: number;
+    comments?: number;
+    shares?: number;
+  };
+  query?: {
+    search?: string;
+  };
 }
 
 // ── Google Places ──────────────────────────────────────────────────────────

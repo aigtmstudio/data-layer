@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CheckCircle2, XCircle, Loader2, RotateCcw, Save } from 'lucide-react';
-import { usePromptConfigs, useUpdatePromptConfig, useResetPromptConfig } from '@/lib/hooks/use-prompt-configs';
+import { usePromptConfigs, useUpdatePromptConfig, useResetPromptConfig, useDataSources } from '@/lib/hooks/use-prompt-configs';
 import type { PromptConfig } from '@/lib/types';
 
 function PromptEditor({ prompt }: { prompt: PromptConfig }) {
@@ -118,6 +118,7 @@ export default function SettingsPage() {
   const [healthLoading, setHealthLoading] = useState(true);
 
   const { data: prompts, isLoading: promptsLoading } = usePromptConfigs();
+  const { data: dataSources } = useDataSources();
 
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -234,29 +235,75 @@ export default function SettingsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Data Sources</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            All external providers and integrations. Optional sources activate when an API key is configured.
+          </p>
         </CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {[
-              { name: 'Apollo', type: 'Contact & Company Data', priority: 1 },
-              { name: 'LeadMagic', type: 'Contact & Company Enrichment', priority: 2 },
-              { name: 'Prospeo', type: 'Email Finding & Verification', priority: 3 },
-            ].map((source) => (
-              <div
-                key={source.name}
-                className="flex items-center justify-between rounded-md border p-3"
-              >
-                <div>
-                  <p className="font-medium">{source.name}</p>
-                  <p className="text-xs text-muted-foreground">{source.type}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline">Priority {source.priority}</Badge>
-                  <Badge variant="secondary">Active</Badge>
-                </div>
+          {!dataSources ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : (() => {
+            const categories = Array.from(new Set(dataSources.map(s => s.category)));
+            return (
+              <div className="space-y-6">
+                {categories.map(category => (
+                  <div key={category}>
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{category}</p>
+                    <div className="space-y-2">
+                      {dataSources.filter(s => s.category === category).map(source => (
+                        <div
+                          key={source.name}
+                          className="flex items-start justify-between rounded-md border p-3 gap-4"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-medium text-sm">{source.displayName}</p>
+                              {source.required && (
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0">Required</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-0.5">{source.description}</p>
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {source.capabilities.map(cap => (
+                                <span key={cap} className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                                  {cap}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 pt-0.5">
+                            {source.priority != null && (
+                              <Badge variant="outline" className="text-xs">P{source.priority}</Badge>
+                            )}
+                            {source.active ? (
+                              <Badge className="gap-1 bg-green-600 text-xs">
+                                <CheckCircle2 className="h-3 w-3" />
+                                Active
+                              </Badge>
+                            ) : (
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge variant="secondary" className="gap-1 text-xs text-muted-foreground">
+                                  <XCircle className="h-3 w-3" />
+                                  Inactive
+                                </Badge>
+                                {source.envVars.map(v => (
+                                  <code key={v} className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono whitespace-nowrap">
+                                    {v}
+                                  </code>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

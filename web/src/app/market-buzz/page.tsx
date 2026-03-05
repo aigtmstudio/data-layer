@@ -1,9 +1,11 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAppStore } from '@/lib/store';
 import { useBuzzReports, useBuzzReport, useGenerateBuzzReport, useDeleteBuzzReport } from '@/lib/hooks/use-market-buzz';
 import { useJob } from '@/lib/hooks/use-jobs';
+import { useSpeakers, useFindSpeakers, speakerKeys } from '@/lib/hooks/use-webinar-speakers';
+import { useQueryClient } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,8 +32,11 @@ import {
   Loader2,
   Trash2,
   Sparkles,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
 import type { TrendingTopic, WebinarAngle, SeedCopy, BuzzReportSummary } from '@/lib/api/market-buzz';
+import type { WebinarSpeaker } from '@/lib/types';
 
 const APPEAL_COLORS: Record<string, string> = {
   high: 'bg-green-500/10 text-green-700 border-green-200',
@@ -44,6 +49,24 @@ const COPY_TYPE_LABELS: Record<string, string> = {
   email_body: 'Email Body',
   linkedin_post: 'LinkedIn Post',
   linkedin_inmessage: 'LinkedIn InMail',
+};
+
+const PLATFORM_COLORS: Record<string, string> = {
+  linkedin: 'bg-blue-100 text-blue-700 border-blue-200',
+  twitter: 'bg-sky-100 text-sky-700 border-sky-200',
+  instagram: 'bg-pink-100 text-pink-700 border-pink-200',
+  youtube: 'bg-red-100 text-red-700 border-red-200',
+  reddit: 'bg-orange-100 text-orange-700 border-orange-200',
+  other: 'bg-gray-100 text-gray-700 border-gray-200',
+};
+
+const PLATFORM_LABELS: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  twitter: 'X / Twitter',
+  instagram: 'Instagram',
+  youtube: 'YouTube',
+  reddit: 'Reddit',
+  other: 'Web',
 };
 
 function CopyButton({ text }: { text: string }) {
@@ -82,6 +105,140 @@ const AUTHORITY_LABELS: Record<string, string> = {
   unknown: '',
 };
 
+function ScoreBar({ label, value }: { label: string; value: number }) {
+  const pct = Math.round(value * 100);
+  return (
+    <div className="flex items-center gap-2 text-xs">
+      <span className="text-muted-foreground w-16 shrink-0">{label}</span>
+      <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden">
+        <div
+          className="h-full bg-primary rounded-full"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-muted-foreground w-8 text-right">{pct}%</span>
+    </div>
+  );
+}
+
+function SpeakerRow({ speaker }: { speaker: WebinarSpeaker }) {
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const platforms = speaker.socialProfiles.length > 0
+    ? speaker.socialProfiles
+    : speaker.primaryPlatform
+      ? [{ platform: speaker.primaryPlatform as WebinarSpeaker['socialProfiles'][0]['platform'], handle: '', url: speaker.primaryProfileUrl ?? '' }]
+      : [];
+
+  return (
+    <div className="rounded-md border p-3 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex items-start gap-2 min-w-0">
+          {speaker.overallRank && (
+            <span className="text-xs font-mono text-muted-foreground shrink-0 mt-0.5">
+              #{speaker.overallRank}
+            </span>
+          )}
+          <div className="min-w-0">
+            <p className="font-medium text-sm leading-tight">{speaker.name}</p>
+            {(speaker.currentTitle || speaker.company) && (
+              <p className="text-xs text-muted-foreground truncate">
+                {[speaker.currentTitle, speaker.company].filter(Boolean).join(', ')}
+              </p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+          {platforms.map((p, i) =>
+            p.url ? (
+              <a
+                key={i}
+                href={p.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium border hover:opacity-80 transition-opacity ${PLATFORM_COLORS[p.platform] ?? PLATFORM_COLORS.other}`}
+              >
+                {PLATFORM_LABELS[p.platform] ?? p.platform}
+                <ExternalLink className="h-2.5 w-2.5" />
+              </a>
+            ) : (
+              <Badge
+                key={i}
+                className={`text-[10px] ${PLATFORM_COLORS[p.platform] ?? PLATFORM_COLORS.other}`}
+              >
+                {PLATFORM_LABELS[p.platform] ?? p.platform}
+              </Badge>
+            )
+          )}
+        </div>
+      </div>
+
+      {(speaker.relevanceScore || speaker.reachScore) && (
+        <div className="space-y-1">
+          {speaker.relevanceScore && (
+            <ScoreBar label="Relevance" value={parseFloat(speaker.relevanceScore)} />
+          )}
+          {speaker.reachScore && (
+            <ScoreBar label="Reach" value={parseFloat(speaker.reachScore)} />
+          )}
+        </div>
+      )}
+
+      {speaker.bio && (
+        <p className="text-xs text-muted-foreground leading-relaxed">{speaker.bio}</p>
+      )}
+
+      {speaker.speakerReasoning && (
+        <div>
+          <p className="text-xs font-medium mb-0.5">Why they&apos;d be great</p>
+          <p className="text-xs text-muted-foreground">{speaker.speakerReasoning}</p>
+        </div>
+      )}
+
+      {speaker.evidence.length > 0 && (
+        <div>
+          <p className="text-xs font-medium mb-0.5">Evidence</p>
+          <div className="space-y-0.5">
+            {speaker.evidence.map((e, i) => (
+              <a
+                key={i}
+                href={e.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground group"
+              >
+                <span>•</span>
+                <span className="truncate group-hover:underline">{e.text}</span>
+                <ExternalLink className="h-2.5 w-2.5 shrink-0" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {speaker.outreachMessage && (
+        <div className="flex items-start justify-between gap-2 bg-muted/50 rounded p-2">
+          <p className="text-xs text-muted-foreground italic leading-relaxed flex-1">
+            {speaker.outreachMessage}
+          </p>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 shrink-0"
+            onClick={() => {
+              navigator.clipboard.writeText(speaker.outreachMessage!);
+              setInviteCopied(true);
+              setTimeout(() => setInviteCopied(false), 2000);
+            }}
+          >
+            {inviteCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TopicCard({ topic }: { topic: TrendingTopic }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -118,7 +275,6 @@ function TopicCard({ topic }: { topic: TrendingTopic }) {
       <CardContent className="space-y-3">
         <p className="text-sm text-muted-foreground">{topic.description}</p>
 
-        {/* Key sources */}
         {topic.sources && topic.sources.length > 0 && (
           <div>
             <p className="text-xs font-medium mb-1.5">Key Sources</p>
@@ -197,7 +353,44 @@ function TopicCard({ topic }: { topic: TrendingTopic }) {
   );
 }
 
-function WebinarCard({ angle }: { angle: WebinarAngle }) {
+function WebinarCard({
+  angle,
+  angleIndex,
+  buzzReportId,
+  clientId,
+}: {
+  angle: WebinarAngle;
+  angleIndex: number;
+  buzzReportId: string;
+  clientId: string;
+}) {
+  const [speakersOpen, setSpeakersOpen] = useState(false);
+  const [findJobId, setFindJobId] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const { data: speakers, refetch: refetchSpeakers } = useSpeakers(buzzReportId, angleIndex);
+  const findMutation = useFindSpeakers();
+  const { data: findJob } = useJob(findJobId);
+
+  useEffect(() => {
+    if (findJob && (findJob.status === 'completed' || findJob.status === 'failed')) {
+      setFindJobId(null);
+      void refetchSpeakers();
+      void queryClient.invalidateQueries({ queryKey: speakerKeys.byAngle(buzzReportId, angleIndex) });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findJob?.status]);
+
+  const isFinding = findJobId !== null && findJob?.status === 'running';
+  const hasSpeakers = speakers && speakers.length > 0;
+
+  const handleFindSpeakers = () => {
+    findMutation.mutate(
+      { clientId, buzzReportId, angleIndex },
+      { onSuccess: (data) => setFindJobId(data.jobId) },
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -238,6 +431,72 @@ function WebinarCard({ angle }: { angle: WebinarAngle }) {
               <li key={i}>{point}</li>
             ))}
           </ul>
+        </div>
+
+        {/* Speakers footer */}
+        <div className="border-t pt-3 mt-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {hasSpeakers ? (
+                <button
+                  onClick={() => setSpeakersOpen(!speakersOpen)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {speakersOpen ? (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  )}
+                  <Users className="h-3.5 w-3.5" />
+                  <span>{speakers.length} speaker{speakers.length !== 1 ? 's' : ''} found</span>
+                </button>
+              ) : isFinding ? (
+                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Searching for speakers...
+                </span>
+              ) : (
+                <span className="text-xs text-muted-foreground">No speakers yet</span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5">
+              {hasSpeakers ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleFindSpeakers}
+                  disabled={isFinding || findMutation.isPending}
+                  title="Refresh speaker list"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={handleFindSpeakers}
+                  disabled={isFinding || findMutation.isPending}
+                >
+                  {isFinding || findMutation.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  ) : (
+                    <Users className="h-3.5 w-3.5 mr-1.5" />
+                  )}
+                  Find Speakers
+                </Button>
+              )}
+            </div>
+          </div>
+
+          {speakersOpen && hasSpeakers && (
+            <div className="mt-3 space-y-2">
+              {speakers.map((speaker) => (
+                <SpeakerRow key={speaker.id} speaker={speaker} />
+              ))}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>
@@ -344,16 +603,13 @@ export default function MarketBuzzPage() {
   const generateMutation = useGenerateBuzzReport();
   const deleteMutation = useDeleteBuzzReport();
 
-  // If no explicit selection, use latest completed
   const latestCompleted = reports?.find((r) => r.status === 'completed');
   const viewingId = selectedReportId ?? latestCompleted?.id ?? null;
   const { data: reportDetail } = useBuzzReport(viewingId);
 
-  // Poll active job
   const { data: activeJob } = useJob(activeJobId);
   const isGenerating = activeJobId !== null && activeJob?.status === 'running';
 
-  // If job completed, clear it and refresh reports
   if (activeJob && (activeJob.status === 'completed' || activeJob.status === 'failed')) {
     setActiveJobId(null);
     refetch();
@@ -381,7 +637,6 @@ export default function MarketBuzzPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Market Buzz</h1>
@@ -415,7 +670,6 @@ export default function MarketBuzzPage() {
         </div>
       </div>
 
-      {/* Generating indicator */}
       {isGenerating && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="flex items-center gap-3 py-4">
@@ -430,7 +684,6 @@ export default function MarketBuzzPage() {
         </Card>
       )}
 
-      {/* Loading / error / empty states */}
       {isLoading ? (
         <div className="flex items-center justify-center py-12">Loading...</div>
       ) : isError ? (
@@ -452,50 +705,36 @@ export default function MarketBuzzPage() {
         </Card>
       ) : report ? (
         <>
-          {/* Summary cards */}
           <div className="grid gap-4 md:grid-cols-3">
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Signals Analyzed
-                </CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Signals Analyzed</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{report.inputSummary.signalsAnalyzed}</p>
-                <p className="text-xs text-muted-foreground">
-                  {report.timeWindow.days}-day window
-                </p>
+                <p className="text-xs text-muted-foreground">{report.timeWindow.days}-day window</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Trending Topics
-                </CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Trending Topics</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{report.trendingTopics.length}</p>
-                <p className="text-xs text-muted-foreground">
-                  across {report.inputSummary.icpSegments.length} segments
-                </p>
+                <p className="text-xs text-muted-foreground">across {report.inputSummary.icpSegments.length} segments</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Webinar Angles
-                </CardTitle>
+                <CardTitle className="text-sm font-medium text-muted-foreground">Webinar Angles</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{report.webinarAngles.length}</p>
-                <p className="text-xs text-muted-foreground">
-                  {report.seedCopy.length} content snippets
-                </p>
+                <p className="text-xs text-muted-foreground">{report.seedCopy.length} content snippets</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Main content tabs */}
           <Tabs defaultValue="topics">
             <TabsList>
               <TabsTrigger value="topics" className="gap-2">
@@ -525,8 +764,14 @@ export default function MarketBuzzPage() {
 
             <TabsContent value="webinars" className="mt-4">
               <div className="grid gap-4 md:grid-cols-2">
-                {report.webinarAngles.map((angle, i) => (
-                  <WebinarCard key={i} angle={angle} />
+                {viewingId && selectedClientId && report.webinarAngles.map((angle, i) => (
+                  <WebinarCard
+                    key={i}
+                    angle={angle}
+                    angleIndex={i}
+                    buzzReportId={viewingId}
+                    clientId={selectedClientId}
+                  />
                 ))}
               </div>
               {report.webinarAngles.length === 0 && (
@@ -549,7 +794,6 @@ export default function MarketBuzzPage() {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="grid gap-4">
                 {report.seedCopy
                   .filter((c) => copyFilter === 'all' || c.type === copyFilter)
@@ -563,7 +807,6 @@ export default function MarketBuzzPage() {
             </TabsContent>
           </Tabs>
 
-          {/* Report history */}
           {reports && (
             <ReportHistory
               reports={reports}

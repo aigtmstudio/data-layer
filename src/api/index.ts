@@ -23,6 +23,8 @@ import { influencerRoutes } from './routes/influencers.js';
 import { competitorMonitoringRoutes } from './routes/competitor-monitoring.js';
 import { discoveryRoutes } from './routes/discovery.js';
 import { marketBuilderRoutes } from './routes/market-builder.js';
+import { webinarSpeakerRoutes } from './routes/webinar-speakers.js';
+import { discoveryTestRoutes } from './routes/discovery-test.js';
 import type { ServiceContainer } from '../index.js';
 
 export async function buildApp(apiKey: string, container: ServiceContainer) {
@@ -57,6 +59,12 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
   await app.register(competitorMonitoringRoutes, { prefix: '/api/competitors', container });
   await app.register(discoveryRoutes, { prefix: '/api/discovery', container });
   await app.register(marketBuilderRoutes, { prefix: '/api/market-builder', container });
+  await app.register(webinarSpeakerRoutes, { prefix: '/api/webinar-speakers', container });
+  await app.register(discoveryTestRoutes, {
+    prefix: '/api/discovery-test',
+    container,
+    providers: container._providers ?? {},
+  });
 
   // Health check
   app.get('/health', async () => ({

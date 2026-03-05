@@ -16,6 +16,8 @@ export interface Client {
 }
 
 export interface ClientSettings {
+  currency?: 'USD' | 'GBP';
+  pricePerQualifiedLead?: number;
   defaultExportFormat?: string;
   crmConfig?: {
     salesforce?: { instanceUrl: string; accessToken: string };
@@ -539,6 +541,45 @@ export interface ProviderCostSummary {
     createdAt: string;
   }[];
   periodDays: number;
+}
+
+// Webinar Speaker
+
+export interface SpeakerSocialProfile {
+  platform: 'linkedin' | 'twitter' | 'instagram' | 'youtube' | 'reddit' | 'other';
+  handle: string;
+  url: string;
+}
+
+export interface SpeakerEvidence {
+  text: string;
+  url: string;
+}
+
+export interface WebinarSpeaker {
+  id: string;
+  clientId: string;
+  buzzReportId: string;
+  angleIndex: number;
+  angleTitle: string;
+  name: string;
+  currentTitle: string | null;
+  company: string | null;
+  bio: string | null;
+  socialProfiles: SpeakerSocialProfile[];
+  primaryPlatform: string | null;
+  primaryProfileUrl: string | null;
+  relevanceScore: string | null;
+  reachScore: string | null;
+  overallRank: number | null;
+  speakerReasoning: string | null;
+  evidence: SpeakerEvidence[];
+  outreachMessage: string | null;
+  discoverySource: string | null;
+  sourceUrl: string | null;
+  jobId: string | null;
+  status: string;
+  createdAt: string;
 }
 
 // API response wrapper

@@ -391,10 +391,25 @@ export class MarketBuilderService {
       }
 
       case 'social_instagram':
-      case 'social_linkedin':
-        // Social discovery injects signals, not companies directly — log and skip for now
-        this.log.info({ provider: task.provider }, 'Social discovery noted in plan (signal-based, not direct TAM addition)');
-        return { found: 0, added: 0 };
+      case 'social_linkedin': {
+        const platform = task.provider === 'social_instagram' ? 'instagram' : 'linkedin';
+        // Load social keywords from active ICPs
+        const icps = await getDb().select().from(schema.icps)
+          .where(and(eq(schema.icps.clientId, clientId), eq(schema.icps.isActive, true)));
+        const socialKw = icps.flatMap(i => (i.socialKeywords as string[]) ?? []);
+        if (socialKw.length === 0) {
+          this.log.info({ provider: task.provider }, 'Social discovery skipped — no socialKeywords on active ICPs');
+          return { found: 0, added: 0 };
+        }
+        const r = await this.discoveryService.discoverFromSocial({
+          clientId,
+          platform: platform as 'instagram' | 'linkedin',
+          keywords: [...new Set(socialKw)],
+          icpId: icpId ?? undefined,
+          limit: p.limit ?? 20,
+        });
+        return { found: r.companiesFound, added: r.companiesAdded };
+      }
 
       default:
         this.log.warn({ provider: task.provider }, 'Unknown provider in plan, skipping');

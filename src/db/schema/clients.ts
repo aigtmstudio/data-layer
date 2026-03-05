@@ -1,6 +1,8 @@
 import { pgTable, uuid, text, timestamp, jsonb, numeric, boolean } from 'drizzle-orm/pg-core';
 
 export interface ClientSettings {
+  currency?: 'USD' | 'GBP';
+  pricePerQualifiedLead?: number;
   defaultExportFormat?: string;
   crmConfig?: {
     salesforce?: { instanceUrl: string; accessToken: string };

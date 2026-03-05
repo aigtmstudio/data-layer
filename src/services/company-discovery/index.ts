@@ -13,7 +13,7 @@ import type { TavilyProvider } from '../../providers/tavily/index.js';
 import type { ApifyProvider } from '../../providers/apify/index.js';
 import type { ExaProvider } from '../../providers/exa/index.js';
 import { mapGooglePlaceToCompany } from '../../providers/apify/mappers.js';
-import type { ListingPlatform } from '../../providers/apify/types.js';
+import type { ListingPlatform, SocialPlatform } from '../../providers/apify/types.js';
 
 // Domains that are platforms/social sites, not actual companies.
 // Results with these domains are noise from search providers.
@@ -175,6 +175,13 @@ export interface NewsDiscoveryResult {
 
 export interface PlacesDiscoveryResult {
   placesSearched: number;
+  companiesFound: number;
+  companiesAdded: number;
+  source: string;
+}
+
+export interface SocialDiscoveryResult {
+  postsSearched: number;
   companiesFound: number;
   companiesAdded: number;
   source: string;
@@ -535,6 +542,157 @@ export class CompanyDiscoveryService {
 
     result.companiesFound = result.companiesAdded;
     log.info(result, 'Listing-based company discovery complete (Exa domain search)');
+    return result;
+  }
+
+  /**
+   * Discover companies from social media posts using LLM extraction.
+   * Analyses post text and author info to find ICP-matching companies.
+   */
+  async discoverFromSocial(params: {
+    clientId: string;
+    platform: SocialPlatform;
+    keywords: string[];
+    icpId?: string;
+    limit?: number;
+  }): Promise<SocialDiscoveryResult> {
+    if (!this.apifyProvider) {
+      throw new Error('Apify provider not configured');
+    }
+
+    const result: SocialDiscoveryResult = { postsSearched: 0, companiesFound: 0, companiesAdded: 0, source: 'social_discovery' };
+    const log = logger.child({ clientId: params.clientId, service: 'company-discovery', method: 'social', platform: params.platform });
+
+    // Load ICP filters for LLM context + exclusions
+    let icpContext = '';
+    let excludeDomains: string[] = [];
+    let excludeKeywords: string[] = [];
+    if (params.icpId) {
+      const [icp] = await getDb()
+        .select()
+        .from(schema.icps)
+        .where(eq(schema.icps.id, params.icpId));
+      if (icp) {
+        const filters = icp.filters as IcpFilters | null;
+        const parts: string[] = [];
+        if (icp.description) parts.push(`Description: ${icp.description}`);
+        if (filters?.industries?.length) parts.push(`Industries: ${filters.industries.join(', ')}`);
+        if (filters?.countries?.length) parts.push(`Geography: ${filters.countries.join(', ')}`);
+        if (filters?.cities?.length) parts.push(`Cities: ${filters.cities.join(', ')}`);
+        if (filters?.employeeCountMin || filters?.employeeCountMax) {
+          parts.push(`Employee size: ${filters.employeeCountMin ?? 0}–${filters.employeeCountMax ?? '∞'}`);
+        }
+        if (filters?.keywords?.length) parts.push(`Keywords: ${filters.keywords.join(', ')}`);
+        icpContext = parts.join('\n');
+        excludeDomains = (filters?.excludeDomains ?? []).map(d => d.toLowerCase());
+        excludeKeywords = (filters?.excludeKeywords ?? []).map(k => k.toLowerCase());
+      }
+    }
+
+    // Pre-load existing companies for dedup
+    const existing = await getDb()
+      .select({ domain: schema.companies.domain, name: schema.companies.name })
+      .from(schema.companies)
+      .where(eq(schema.companies.clientId, params.clientId));
+    const existingDomains = new Set(existing.map(c => c.domain).filter(Boolean).map(d => d!.toLowerCase()));
+    const existingNames = new Set(existing.map(c => c.name.toLowerCase()));
+
+    // Fetch social posts
+    const posts = await this.apifyProvider.searchSocialPosts({
+      platform: params.platform,
+      keywords: params.keywords,
+      limit: params.limit ?? 20,
+    });
+    result.postsSearched = posts.length;
+
+    if (posts.length === 0) return result;
+
+    // Build post summary for LLM (truncated for token efficiency)
+    const postSummary = posts.slice(0, 30).map((p, i) => {
+      const author = [p.authorName, p.authorHandle ? `@${p.authorHandle}` : ''].filter(Boolean).join(' ');
+      const text = (p.text ?? '').slice(0, 300);
+      return `${i + 1}. [${p.platform}] Author: ${author || 'unknown'}\n   ${text}`;
+    }).join('\n\n');
+
+    const icpSection = icpContext
+      ? `The client sells to businesses matching this profile:\n${icpContext}`
+      : 'Extract any businesses that appear to be real companies (not individuals or platforms).';
+
+    const excludeSection = excludeDomains.length || excludeKeywords.length
+      ? `\nEXCLUDE these known competitors/companies:\n${[...excludeDomains, ...excludeKeywords].join(', ')}`
+      : '';
+
+    const prompt = `You are extracting potential target companies from social media posts.
+
+${icpSection}${excludeSection}
+
+From these social media posts, extract any businesses that could be potential customers:
+
+${postSummary}
+
+For each business found, provide:
+- name: the business name
+- website: domain if mentioned or inferrable (omit if unknown)
+- city: location if mentioned (omit if unknown)
+- source: "author" if the post author works at or owns the company, or "mention" if named in the post text
+- reasoning: one sentence on why they match
+
+Return ONLY valid JSON: [{"name": "...", "website": "...", "city": "...", "source": "...", "reasoning": "..."}]
+Return [] if none found.`;
+
+    try {
+      const response = await this.anthropic.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const text = response.content.find(b => b.type === 'text')?.text ?? '';
+      const jsonMatch = text.match(/\[[\s\S]*\]/);
+      if (!jsonMatch) return result;
+
+      const extracted = JSON.parse(jsonMatch[0]) as Array<{
+        name: string;
+        website?: string;
+        city?: string;
+        source?: string;
+        reasoning?: string;
+      }>;
+      result.companiesFound = extracted.length;
+
+      for (const biz of extracted) {
+        if (!biz.name) continue;
+        const nameLower = biz.name.toLowerCase();
+        // Skip excluded keywords
+        if (excludeKeywords.some(k => nameLower.includes(k))) continue;
+        // Skip excluded domains
+        if (biz.website && excludeDomains.includes(biz.website.toLowerCase())) continue;
+        // Skip blocked platform names/domains
+        if (isBlockedCompanyName(biz.name)) continue;
+        if (biz.website && isBlockedDomain(biz.website)) continue;
+        // Dedup against existing
+        if (existingNames.has(nameLower)) continue;
+        if (biz.website && existingDomains.has(biz.website.toLowerCase())) continue;
+
+        const company: UnifiedCompany = {
+          name: biz.name,
+          domain: biz.website,
+          websiteUrl: biz.website ? `https://${biz.website}` : undefined,
+          city: biz.city,
+          description: biz.reasoning,
+          externalIds: {},
+        };
+
+        await this.upsertDiscoveredCompanyWithSource(params.clientId, company, 'social_discovery');
+        if (biz.website) existingDomains.add(biz.website.toLowerCase());
+        existingNames.add(nameLower);
+        result.companiesAdded++;
+      }
+    } catch (err) {
+      log.error({ err }, 'LLM social post analysis failed');
+    }
+
+    log.info(result, 'Social-based company discovery complete');
     return result;
   }
 

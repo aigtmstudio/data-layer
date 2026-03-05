@@ -10,6 +10,7 @@ const createClientBody = z.object({
   website: z.string().url().optional(),
   notes: z.string().optional(),
   creditMarginPercent: z.number().min(0).max(100).optional(),
+  settings: z.record(z.unknown()).optional(),
 });
 
 const updateClientBody = z.object({

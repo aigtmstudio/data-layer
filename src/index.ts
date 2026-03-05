@@ -24,6 +24,7 @@ import {
   MarketSignalSearcher,
   EngagementBriefGenerator,
   MarketBuzzGenerator,
+  WebinarSpeakerFinder,
 } from './services/intelligence/index.js';
 import { ApolloProvider } from './providers/apollo/index.js';
 import { LeadMagicProvider } from './providers/leadmagic/index.js';
@@ -84,6 +85,15 @@ export interface ServiceContainer {
   competitorMonitor?: CompetitorMonitorService;
   // Market builder AI strategist
   marketBuilder: MarketBuilderService;
+  // Webinar speaker finder
+  webinarSpeakerFinder: WebinarSpeakerFinder;
+  // Raw providers (exposed for discovery-test routes)
+  _providers?: {
+    apify?: ApifyProvider;
+    exa?: ExaProvider;
+    tavily?: TavilyProvider;
+    anthropicApiKey?: string;
+  };
 }
 
 let container: ServiceContainer;
@@ -241,6 +251,12 @@ async function main() {
   const marketBuilder = new MarketBuilderService(discoveryService, listBuilder, llm.marketBuilder);
   logger.info('Market builder service initialized');
 
+  // Webinar speaker finder
+  const webinarSpeakerFinder = new WebinarSpeakerFinder(config.anthropicApiKey);
+  if (exaProvider) webinarSpeakerFinder.setExaProvider(exaProvider);
+  if (apifyProvider) webinarSpeakerFinder.setApifyProvider(apifyProvider);
+  logger.info({ exa: !!exaProvider, apify: !!apifyProvider }, 'Webinar speaker finder initialized');
+
   // 4. Store in container
   container = {
     creditManager,
@@ -269,6 +285,8 @@ async function main() {
     influencerMonitor,
     competitorMonitor,
     marketBuilder,
+    webinarSpeakerFinder,
+    _providers: { apify: apifyProvider, exa: exaProvider, tavily: tavilyProvider, anthropicApiKey: config.anthropicApiKey },
   };
 
   // 5. Start scheduler with handlers

@@ -27,3 +27,4 @@ export { MarketBuzzGenerator } from './market-buzz-generator.js';
 export type { BuzzReport } from '../../db/schema/market-buzz.js';
 export { MarketBuilderService } from './market-builder.js';
 export type { MarketBuilderPlan, ProviderTask, ExecutionRecord, SavedPlan } from './market-builder.js';
+export { WebinarSpeakerFinder } from './webinar-speaker-finder.js';

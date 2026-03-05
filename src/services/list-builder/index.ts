@@ -820,7 +820,7 @@ export class ListBuilder {
         ));
 
       for (const contact of matchingContacts) {
-        await db
+        const inserted = await db
           .insert(schema.listMembers)
           .values({
             listId: params.contactListId,
@@ -831,17 +831,26 @@ export class ListBuilder {
             intelligenceScore: member.intelligenceScore,
             addedReason: `Persona: ${persona.name} | Title: ${contact.title}`,
           })
-          .onConflictDoNothing();
-        contactsAdded++;
+          .onConflictDoNothing()
+          .returning({ id: schema.listMembers.id });
+        if (inserted.length > 0) contactsAdded++;
       }
     }
 
-    // Update contact list stats
+    // Update contact list stats with actual DB count
+    const [{ count: actualCount }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(schema.listMembers)
+      .where(and(
+        eq(schema.listMembers.listId, params.contactListId),
+        isNull(schema.listMembers.removedAt),
+      ));
+
     await db
       .update(schema.lists)
       .set({
-        contactCount: contactsAdded,
-        memberCount: contactsAdded,
+        contactCount: actualCount,
+        memberCount: actualCount,
         updatedAt: new Date(),
       })
       .where(eq(schema.lists.id, params.contactListId));

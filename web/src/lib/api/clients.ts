@@ -17,7 +17,7 @@ export async function createClient(data: {
   industry?: string;
   website?: string;
   notes?: string;
-  creditMarginPercent?: string;
+  settings?: Record<string, unknown>;
 }): Promise<Client> {
   const body: Record<string, unknown> = {
     name: data.name,
@@ -26,7 +26,7 @@ export async function createClient(data: {
   if (data.industry) body.industry = data.industry;
   if (data.website) body.website = data.website;
   if (data.notes) body.notes = data.notes;
-  if (data.creditMarginPercent) body.creditMarginPercent = parseFloat(data.creditMarginPercent);
+  if (data.settings) body.settings = data.settings;
   const res = await apiClient.post<ApiResponse<Client>>('/api/clients', body);
   return res.data;
 }
@@ -43,7 +43,9 @@ export async function updateClient(
     isActive: boolean;
   }>,
 ): Promise<Client> {
-  const res = await apiClient.patch<ApiResponse<Client>>(`/api/clients/${id}`, data);
+  const body: Record<string, unknown> = { ...data };
+  if (data.creditMarginPercent != null) body.creditMarginPercent = parseFloat(data.creditMarginPercent);
+  const res = await apiClient.patch<ApiResponse<Client>>(`/api/clients/${id}`, body);
   return res.data;
 }
 

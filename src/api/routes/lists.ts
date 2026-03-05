@@ -341,17 +341,28 @@ export const listRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = a
   app.get<{ Params: { id: string } }>('/:id/funnel', async (request) => {
     const db = getDb();
 
+    // Check list type — only exclude contact members for company lists
+    const [list] = await db
+      .select({ type: schema.lists.type })
+      .from(schema.lists)
+      .where(eq(schema.lists.id, request.params.id));
+
+    const conditions = [
+      eq(schema.listMembers.listId, request.params.id),
+      isNull(schema.listMembers.removedAt),
+    ];
+    // For company lists, only count company-level members (exclude contact rows)
+    if (list?.type !== 'contact') {
+      conditions.push(isNull(schema.listMembers.contactId));
+    }
+
     const rows = await db
       .select({
         stage: schema.listMembers.pipelineStage,
         count: sql<number>`count(*)::int`,
       })
       .from(schema.listMembers)
-      .where(and(
-        eq(schema.listMembers.listId, request.params.id),
-        isNull(schema.listMembers.removedAt),
-        isNull(schema.listMembers.contactId),
-      ))
+      .where(and(...conditions))
       .groupBy(schema.listMembers.pipelineStage);
 
     const stages: Record<string, number> = {};

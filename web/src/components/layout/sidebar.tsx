@@ -25,6 +25,7 @@ import {
   Radio,
   TrendingUp,
   DollarSign,
+  FlaskConical,
   Menu,
   type LucideIcon,
 } from 'lucide-react';
@@ -46,6 +47,7 @@ const navItems: NavItem[] = [
   { href: '/enrichment', label: 'Enrichment', icon: Zap },
   { href: '/jobs', label: 'Jobs', icon: Activity },
   { href: '/costs', label: 'Costs', icon: DollarSign },
+  { href: '/discovery-test', label: 'Discovery Test', icon: FlaskConical },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 

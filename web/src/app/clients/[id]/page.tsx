@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useClient, useUpdateClient, useDeleteClient } from '@/lib/hooks/use-clients';
 import { useIcps, useCreateIcp, useDeleteIcp } from '@/lib/hooks/use-icps';
+import { useLists } from '@/lib/hooks/use-lists';
 import { useCreditBalance, useCreditHistory, useAddCredits } from '@/lib/hooks/use-credits';
 import { useHypotheses, useGenerateHypotheses, useCreateHypothesis, useUpdateHypothesis, useDeleteHypothesis, useClearHypotheses } from '@/lib/hooks/use-hypotheses';
 import { useInfluencers, useCreateInfluencer, useUpdateInfluencer, useDeleteInfluencer, useFetchInfluencerPosts } from '@/lib/hooks/use-influencers';
@@ -29,7 +30,7 @@ import {
 } from '@/components/ui/select';
 import { DataTable } from '@/components/shared/data-table';
 import { formatCurrency, formatDate } from '@/lib/utils';
-import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt, Trash2, Lightbulb, AlertTriangle, RefreshCw, Globe, Users, ShieldAlert, X, Pencil } from 'lucide-react';
+import { ArrowLeft, Plus, Sparkles, TrendingUp, DollarSign, Receipt, Trash2, Lightbulb, AlertTriangle, RefreshCw, Globe, Users, ShieldAlert, X, Pencil, Building2, FileText, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
 import type { ColumnDef } from '@tanstack/react-table';
@@ -46,8 +47,7 @@ const creditColumns: ColumnDef<CreditTransaction>[] = [
   { accessorKey: 'description', header: 'Description', cell: ({ row }) => (
     <span className="line-clamp-1 max-w-[200px]">{row.original.description}</span>
   )},
-  { accessorKey: 'baseCost', header: 'Base Cost', cell: ({ row }) => row.original.baseCost ? formatCurrency(row.original.baseCost) : '-' },
-  { accessorKey: 'marginAmount', header: 'Margin', cell: ({ row }) => row.original.marginAmount ? formatCurrency(row.original.marginAmount) : '-' },
+  { accessorKey: 'baseCost', header: 'Cost', cell: ({ row }) => row.original.baseCost ? formatCurrency(row.original.baseCost) : '-' },
   { accessorKey: 'amount', header: 'Total Charged', cell: ({ row }) => formatCurrency(row.original.amount) },
   { accessorKey: 'dataSource', header: 'Source', cell: ({ row }) => row.original.dataSource ? <Badge variant="secondary" className="text-xs">{row.original.dataSource}</Badge> : '-' },
   { accessorKey: 'balanceAfter', header: 'Balance', cell: ({ row }) => formatCurrency(row.original.balanceAfter) },
@@ -97,6 +97,7 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
   const updateClient = useUpdateClient();
   const deleteClient = useDeleteClient();
   const { data: icps } = useIcps(id);
+  const { data: lists } = useLists(id);
   const { data: balance } = useCreditBalance(id);
   const { data: history } = useCreditHistory(id);
   const addCredits = useAddCredits();
@@ -300,15 +301,19 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
                 <CardTitle className="text-sm font-medium">Credit Balance</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{balance ? formatCurrency(balance.balance) : formatCurrency(client.creditBalance)}</p>
+                <p className="text-2xl font-bold">{balance ? formatCurrency(balance.balance, 2, client.settings?.currency ?? 'USD') : formatCurrency(client.creditBalance, 2, client.settings?.currency ?? 'USD')}</p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium">Margin Rate</CardTitle>
+                <CardTitle className="text-sm font-medium">Price per Qualified Lead</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{client.creditMarginPercent}%</p>
+                {client.settings?.pricePerQualifiedLead != null ? (
+                  <p className="text-2xl font-bold">{formatCurrency(client.settings.pricePerQualifiedLead, 0, client.settings.currency ?? 'USD')}</p>
+                ) : (
+                  <p className="text-2xl font-bold text-muted-foreground">—</p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -321,81 +326,100 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
             </Card>
           </div>
 
-          {/* Profitability Summary */}
-          {(() => {
-            const usageTxns = (history ?? []).filter((t) => t.type === 'usage');
-            const totalBaseCost = usageTxns.reduce((sum, t) => sum + (t.baseCost ? parseFloat(t.baseCost) : 0), 0);
-            const totalMargin = usageTxns.reduce((sum, t) => sum + (t.marginAmount ? parseFloat(t.marginAmount) : 0), 0);
-            const totalCharged = usageTxns.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
-            const effectiveMargin = totalCharged > 0 ? (totalMargin / totalCharged) * 100 : 0;
+          {/* About */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Building2 className="h-4 w-4" />
+                About
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5">
+              {/* Profile row */}
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {client.industry && (
+                    <Badge variant="secondary">{client.industry}</Badge>
+                  )}
+                  {client.website && (
+                    <a
+                      href={client.website}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary"
+                    >
+                      <ExternalLink className="h-3 w-3" />
+                      {client.website.replace(/^https?:\/\//, '')}
+                    </a>
+                  )}
+                </div>
+                {client.notes ? (
+                  <p className="text-sm text-muted-foreground leading-relaxed">{client.notes}</p>
+                ) : (
+                  <p className="text-sm text-muted-foreground/50 italic">No notes added yet.</p>
+                )}
+              </div>
 
-            return (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <TrendingUp className="h-4 w-4" />
-                    Profitability
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 md:grid-cols-4">
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <Receipt className="h-3.5 w-3.5" />
-                        Raw Cost
-                      </div>
-                      <p className="mt-1 text-xl font-bold">{formatCurrency(totalBaseCost)}</p>
-                      <p className="text-xs text-muted-foreground">What you pay providers</p>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        Margin Earned
-                      </div>
-                      <p className="mt-1 text-xl font-bold text-green-600">{formatCurrency(totalMargin)}</p>
-                      <p className="text-xs text-muted-foreground">Your markup</p>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <DollarSign className="h-3.5 w-3.5" />
-                        Total Billed
-                      </div>
-                      <p className="mt-1 text-xl font-bold">{formatCurrency(totalCharged)}</p>
-                      <p className="text-xs text-muted-foreground">Client was charged</p>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                        <TrendingUp className="h-3.5 w-3.5" />
-                        Effective Margin
-                      </div>
-                      <p className="mt-1 text-xl font-bold">{effectiveMargin.toFixed(1)}%</p>
-                      <p className="text-xs text-muted-foreground">Across {usageTxns.length} operations</p>
-                    </div>
+              {/* Activity stats */}
+              <div className="grid grid-cols-4 gap-4 border-t pt-4">
+                <div>
+                  <p className="text-2xl font-bold">{(icps ?? []).filter(i => i.isActive).length}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Target profiles</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{(hypotheses ?? []).filter(h => h.status === 'active').length}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Active hypotheses</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{(lists ?? []).length}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Lists</p>
+                </div>
+                <div>
+                  <p className="text-2xl font-bold">{(influencers ?? []).length}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Influencers tracked</p>
+                </div>
+              </div>
+
+              {/* ICP profiles */}
+              {(icps ?? []).filter(i => i.isActive).length > 0 && (
+                <div className="space-y-2 border-t pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Target Profiles</p>
+                  <div className="space-y-2">
+                    {(icps ?? []).filter(i => i.isActive).map((icp) => (
+                      <a
+                        key={icp.id}
+                        href={`/icps/${icp.id}`}
+                        className="group block rounded-md border p-3 hover:bg-muted/50 transition-colors"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium group-hover:text-primary">{icp.name}</p>
+                            {icp.naturalLanguageInput && (
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{icp.naturalLanguageInput}</p>
+                            )}
+                            <div className="flex flex-wrap gap-1 mt-1.5">
+                              {icp.filters?.industries?.slice(0, 3).map((ind) => (
+                                <span key={ind} className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">{ind}</span>
+                              ))}
+                              {(icp.filters?.employeeCountMin != null || icp.filters?.employeeCountMax != null) && (
+                                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
+                                  {icp.filters?.employeeCountMin ?? 1}–{icp.filters?.employeeCountMax ?? '∞'} employees
+                                </span>
+                              )}
+                              {icp.filters?.countries?.slice(0, 2).map((c) => (
+                                <span key={c} className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">{c}</span>
+                              ))}
+                            </div>
+                          </div>
+                          <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40 mt-0.5" />
+                        </div>
+                      </a>
+                    ))}
                   </div>
-                </CardContent>
-              </Card>
-            );
-          })()}
-
-          {client.website && (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Website</p>
-                <a href={client.website} target="_blank" rel="noopener noreferrer" className="text-sm text-primary hover:underline">
-                  {client.website}
-                </a>
-              </CardContent>
-            </Card>
-          )}
-
-          {client.notes && (
-            <Card>
-              <CardContent className="pt-6">
-                <p className="text-sm text-muted-foreground">Notes</p>
-                <p className="text-sm">{client.notes}</p>
-              </CardContent>
-            </Card>
-          )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="icps" className="space-y-4">
@@ -902,10 +926,66 @@ export default function ClientDetailPage({ params }: { params: Promise<{ id: str
         </TabsContent>
 
         <TabsContent value="credits" className="space-y-4">
+          {/* Profitability */}
+          {(() => {
+            const cur = client.settings?.currency ?? 'USD';
+            const usageTxns = (history ?? []).filter((t) => t.type === 'usage');
+            const totalBaseCost = usageTxns.reduce((sum, t) => sum + (t.baseCost ? parseFloat(t.baseCost) : 0), 0);
+            const totalMargin = usageTxns.reduce((sum, t) => sum + (t.marginAmount ? parseFloat(t.marginAmount) : 0), 0);
+            const totalCharged = usageTxns.reduce((sum, t) => sum + Math.abs(parseFloat(t.amount)), 0);
+            const effectiveMargin = totalCharged > 0 ? (totalMargin / totalCharged) * 100 : 0;
+            return (
+              <Card>
+                <CardHeader className="pb-3">
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <TrendingUp className="h-4 w-4" />
+                    Profitability
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 md:grid-cols-4">
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <Receipt className="h-3.5 w-3.5" />
+                        Raw Cost
+                      </div>
+                      <p className="mt-1 text-xl font-bold">{formatCurrency(totalBaseCost, 2, cur)}</p>
+                      <p className="text-xs text-muted-foreground">What you pay providers</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        Markup Earned
+                      </div>
+                      <p className="mt-1 text-xl font-bold text-green-600">{formatCurrency(totalMargin, 2, cur)}</p>
+                      <p className="text-xs text-muted-foreground">Your markup</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <DollarSign className="h-3.5 w-3.5" />
+                        Total Billed
+                      </div>
+                      <p className="mt-1 text-xl font-bold">{formatCurrency(totalCharged, 2, cur)}</p>
+                      <p className="text-xs text-muted-foreground">Client was charged</p>
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                        <TrendingUp className="h-3.5 w-3.5" />
+                        Effective Rate
+                      </div>
+                      <p className="mt-1 text-xl font-bold">{effectiveMargin.toFixed(1)}%</p>
+                      <p className="text-xs text-muted-foreground">Across {usageTxns.length} operations</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-muted-foreground">Current Balance</p>
-              <p className="text-2xl font-bold">{balance ? formatCurrency(balance.balance) : '-'}</p>
+              <p className="text-2xl font-bold">{balance ? formatCurrency(balance.balance, 2, client.settings?.currency ?? 'USD') : '-'}</p>
             </div>
             <Button onClick={() => setAddCreditsOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />

@@ -4,10 +4,12 @@ import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { CheckCircle2, XCircle, Loader2, RotateCcw, Save } from 'lucide-react';
 import { usePromptConfigs, useUpdatePromptConfig, useResetPromptConfig, useDataSources } from '@/lib/hooks/use-prompt-configs';
+import { useClients, useUpdateClient } from '@/lib/hooks/use-clients';
 import type { PromptConfig } from '@/lib/types';
 
 function PromptEditor({ prompt }: { prompt: PromptConfig }) {
@@ -112,6 +114,72 @@ function PromptEditor({ prompt }: { prompt: PromptConfig }) {
   );
 }
 
+function ClientBillingRow({ client }: { client: import('@/lib/types').Client }) {
+  const updateClient = useUpdateClient();
+  const [margin, setMargin] = useState(client.creditMarginPercent ?? '30');
+  const [price, setPrice] = useState(String(client.settings?.pricePerQualifiedLead ?? ''));
+  const [currency, setCurrency] = useState<'USD' | 'GBP'>(client.settings?.currency ?? 'USD');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await updateClient.mutateAsync({
+        id: client.id,
+        data: {
+          creditMarginPercent: margin,
+          settings: {
+            ...(client.settings ?? {}),
+            currency,
+            pricePerQualifiedLead: price ? parseFloat(price) : undefined,
+          },
+        },
+      });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3 rounded-md border p-3">
+      <div className="w-36 flex-shrink-0">
+        <p className="text-sm font-medium truncate">{client.name}</p>
+        <p className="text-xs text-muted-foreground">{client.slug}</p>
+      </div>
+      <select
+        value={currency}
+        onChange={(e) => setCurrency(e.target.value as 'USD' | 'GBP')}
+        className="h-8 rounded-md border bg-background px-2 text-xs w-20"
+      >
+        <option value="USD">$ USD</option>
+        <option value="GBP">£ GBP</option>
+      </select>
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          type="number"
+          placeholder="Price/lead"
+          className="h-8 w-28 text-xs"
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <Input
+          value={margin}
+          onChange={(e) => setMargin(e.target.value)}
+          type="number"
+          placeholder="Margin %"
+          className="h-8 w-24 text-xs"
+        />
+        <span className="text-xs text-muted-foreground">%</span>
+      </div>
+      <Button size="sm" variant="outline" onClick={handleSave} disabled={saving} className="ml-auto h-8">
+        {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+      </Button>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const [health, setHealth] = useState<{ status: string; timestamp: string } | null>(null);
   const [healthError, setHealthError] = useState(false);
@@ -119,6 +187,7 @@ export default function SettingsPage() {
 
   const { data: prompts, isLoading: promptsLoading } = usePromptConfigs();
   const { data: dataSources } = useDataSources();
+  const { data: clients } = useClients();
 
   useEffect(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
@@ -329,6 +398,30 @@ export default function SettingsPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Cost Configuration — internal only */}
+      {clients && clients.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Cost Configuration</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1 mb-2">
+              <div className="flex items-center gap-3 px-3 text-xs text-muted-foreground">
+                <span className="w-36">Client</span>
+                <span className="w-20">Currency</span>
+                <span className="w-28">Price / Lead</span>
+                <span className="w-24">Margin</span>
+              </div>
+            </div>
+            <div className="space-y-2">
+              {clients.map((client) => (
+                <ClientBillingRow key={client.id} client={client} />
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/shared/empty-state';
 import { formatCurrency } from '@/lib/utils';
+import type { ClientSettings } from '@/lib/types';
 import { Plus, Users, Building2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ErrorBanner } from '@/components/shared/error-banner';
@@ -21,8 +22,12 @@ export default function ClientsPage() {
   const { setSelectedClientId } = useAppStore();
 
   const handleCreate = async (data: Parameters<typeof createClient.mutateAsync>[0]) => {
+    const { currency, pricePerQualifiedLead, ...rest } = data as typeof data & { currency?: string; pricePerQualifiedLead?: string };
+    const settings: ClientSettings = {};
+    if (currency) settings.currency = currency as 'USD' | 'GBP';
+    if (pricePerQualifiedLead) settings.pricePerQualifiedLead = parseFloat(pricePerQualifiedLead);
     try {
-      const client = await createClient.mutateAsync(data);
+      const client = await createClient.mutateAsync({ ...rest, settings: Object.keys(settings).length ? (settings as Record<string, unknown>) : undefined });
       setSelectedClientId(client.id);
       setFormOpen(false);
       toast.success('Client created');
@@ -93,12 +98,14 @@ export default function ClientsPage() {
                     )}
                     <div className="flex items-center justify-between">
                       <span className="text-sm text-muted-foreground">Credits</span>
-                      <span className="font-medium">{formatCurrency(client.creditBalance)}</span>
+                      <span className="font-medium">{formatCurrency(client.creditBalance, 2, client.settings?.currency ?? 'USD')}</span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Margin</span>
-                      <span className="text-sm">{client.creditMarginPercent}%</span>
-                    </div>
+                    {client.settings?.pricePerQualifiedLead != null && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm text-muted-foreground">Price / Qualified Lead</span>
+                        <span className="text-sm font-medium">{formatCurrency(client.settings.pricePerQualifiedLead, 0, client.settings.currency ?? 'USD')}</span>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

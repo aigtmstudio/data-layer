@@ -5,12 +5,12 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-export function formatCurrency(value: string | number, decimals = 2): string {
+export function formatCurrency(value: string | number, decimals = 2, currency: 'USD' | 'GBP' = 'USD'): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;
-  if (isNaN(num)) return '$0.00';
-  return new Intl.NumberFormat('en-US', {
+  if (isNaN(num)) return currency === 'GBP' ? '£0.00' : '$0.00';
+  return new Intl.NumberFormat(currency === 'GBP' ? 'en-GB' : 'en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(num);

@@ -13,6 +13,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const clientSchema = z.object({
   name: z.string().min(1, 'Name is required'),
@@ -20,7 +27,8 @@ const clientSchema = z.object({
   industry: z.string().optional(),
   website: z.string().url().optional().or(z.literal('')),
   notes: z.string().optional(),
-  creditMarginPercent: z.string().optional(),
+  currency: z.enum(['USD', 'GBP']).optional(),
+  pricePerQualifiedLead: z.string().optional(),
 });
 
 type ClientFormValues = z.infer<typeof clientSchema>;
@@ -50,7 +58,8 @@ export function ClientForm({
       industry: '',
       website: '',
       notes: '',
-      creditMarginPercent: '30',
+      currency: 'USD',
+      pricePerQualifiedLead: '',
       ...defaultValues,
     },
   });
@@ -90,14 +99,31 @@ export function ClientForm({
             <Input id="website" {...form.register('website')} placeholder="https://example.com" />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="creditMarginPercent">Credit Margin %</Label>
-            <Input
-              id="creditMarginPercent"
-              type="number"
-              {...form.register('creditMarginPercent')}
-              placeholder="30"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label>Currency</Label>
+              <Select
+                value={form.watch('currency')}
+                onValueChange={(v) => form.setValue('currency', v as 'USD' | 'GBP')}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Currency" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">$ USD</SelectItem>
+                  <SelectItem value="GBP">£ GBP</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="pricePerQualifiedLead">Price per Qualified Lead</Label>
+              <Input
+                id="pricePerQualifiedLead"
+                type="number"
+                {...form.register('pricePerQualifiedLead')}
+                placeholder="500"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">

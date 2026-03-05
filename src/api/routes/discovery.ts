@@ -4,6 +4,7 @@ import type { ServiceContainer } from '../../index.js';
 import { logger } from '../../lib/logger.js';
 
 const listingPlatforms = ['opentable', 'ubereats', 'justeat'] as const;
+const socialPlatforms = ['instagram', 'twitter', 'youtube', 'reddit', 'linkedin'] as const;
 
 const newsBody = z.object({
   clientId: z.string().uuid(),
@@ -30,6 +31,14 @@ const listingsBody = z.object({
   platform: z.enum(listingPlatforms),
   location: z.string().min(1),
   limit: z.number().int().min(1).max(200).optional(),
+});
+
+const socialBody = z.object({
+  clientId: z.string().uuid(),
+  platform: z.enum(socialPlatforms),
+  keywords: z.array(z.string().min(1)).min(1).max(10),
+  icpId: z.string().uuid().optional(),
+  limit: z.number().int().min(1).max(50).optional(),
 });
 
 export const discoveryRoutes: FastifyPluginAsync<{ container: ServiceContainer }> = async (app, opts) => {
@@ -96,5 +105,19 @@ export const discoveryRoutes: FastifyPluginAsync<{ container: ServiceContainer }
       .discoverFromListings({ clientId: body.clientId, platform: body.platform, location: body.location, limit: body.limit })
       .then((result) => log.info({ clientId: body.clientId, ...result }, 'Listing discovery complete'))
       .catch((err) => log.error({ err, clientId: body.clientId }, 'Listing discovery failed'));
+  });
+
+  // POST /api/discovery/social
+  // Find companies from social media posts using LLM extraction
+  app.post('/social', async (request, reply) => {
+    const body = socialBody.parse(request.body);
+    log.info({ clientId: body.clientId, platform: body.platform, keywords: body.keywords }, 'Social discovery triggered');
+
+    reply.status(202).send({ data: { message: 'Social discovery started' } });
+
+    companyDiscovery
+      .discoverFromSocial({ clientId: body.clientId, platform: body.platform, keywords: body.keywords, icpId: body.icpId, limit: body.limit })
+      .then((result) => log.info({ clientId: body.clientId, ...result }, 'Social discovery complete'))
+      .catch((err) => log.error({ err, clientId: body.clientId }, 'Social discovery failed'));
   });
 };

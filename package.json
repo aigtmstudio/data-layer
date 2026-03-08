@@ -39,6 +39,9 @@
     "postgres": "^3.4.5",
     "zod": "^3.24.1"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "@types/pdf-parse": "^1.1.5",

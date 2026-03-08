@@ -1,5 +1,6 @@
 'use client';
 
+import { UserButton } from '@clerk/nextjs';
 import { useAppStore } from '@/lib/store';
 import { useClients } from '@/lib/hooks/use-clients';
 import { useCreditBalance } from '@/lib/hooks/use-credits';
@@ -52,6 +53,7 @@ export function Header() {
             {formatCurrency(balance.balance)}
           </Badge>
         )}
+        <UserButton />
       </div>
     </header>
   );

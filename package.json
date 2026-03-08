@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@clerk/backend": "^3.0.1",
     "@fastify/cors": "^11.0.0",
     "@fastify/multipart": "^9.4.0",
     "csv-parse": "^6.1.0",

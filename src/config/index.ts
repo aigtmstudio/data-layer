@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
-  API_PORT: z.coerce.number().default(3000),
+  PORT: z.coerce.number().optional(),
+  API_PORT: z.coerce.number().optional(),
   API_KEY: z.string().min(1),
 
   ANTHROPIC_API_KEY: z.string().min(1),
@@ -26,6 +27,18 @@ const envSchema = z.object({
 
   UPTIMEROBOT_API_KEY: z.string().optional(),
 
+  // Auth (Clerk)
+  CLERK_SECRET_KEY: z.string().optional(),
+  CLERK_PUBLISHABLE_KEY: z.string().optional(),
+
+  // CORS
+  CORS_ORIGIN: z.string().optional(),
+
+  // Demo endpoints
+  DEMO_CLIENT_ID: z.string().uuid().optional(),
+  DEMO_DAILY_LIMIT: z.coerce.number().default(100),
+  DEMO_CREDIT_BYPASS: z.string().transform(v => v === 'true').default('false'),
+
   GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: z.string().optional(),
   GOOGLE_SHEETS_PRIVATE_KEY: z.string().optional(),
 
@@ -42,7 +55,7 @@ if (!parsed.success) {
 
 export const config = {
   databaseUrl: parsed.data.DATABASE_URL,
-  apiPort: parsed.data.API_PORT,
+  apiPort: parsed.data.API_PORT ?? parsed.data.PORT ?? 3000,
   apiKey: parsed.data.API_KEY,
   anthropicApiKey: parsed.data.ANTHROPIC_API_KEY,
   apolloApiKey: parsed.data.APOLLO_API_KEY,
@@ -61,6 +74,12 @@ export const config = {
   scrapegraphApiKey: parsed.data.SCRAPEGRAPH_API_KEY,
   jinaApiKey: parsed.data.JINA_API_KEY,
   uptimerobotApiKey: parsed.data.UPTIMEROBOT_API_KEY,
+  clerkSecretKey: parsed.data.CLERK_SECRET_KEY,
+  clerkPublishableKey: parsed.data.CLERK_PUBLISHABLE_KEY,
+  corsOrigin: parsed.data.CORS_ORIGIN,
+  demoClientId: parsed.data.DEMO_CLIENT_ID,
+  demoDailyLimit: parsed.data.DEMO_DAILY_LIMIT,
+  demoCreditBypass: parsed.data.DEMO_CREDIT_BYPASS,
   googleSheets: {
     email: parsed.data.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
     privateKey: parsed.data.GOOGLE_SHEETS_PRIVATE_KEY,

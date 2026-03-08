@@ -1,20 +1,32 @@
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+const STATIC_API_KEY = process.env.NEXT_PUBLIC_API_KEY || '';
+
+type TokenGetter = () => Promise<string | null>;
+
+let _getToken: TokenGetter = async () => STATIC_API_KEY || null;
+
+export function setTokenGetter(fn: TokenGetter) {
+  _getToken = fn;
+}
 
 class ApiClient {
   private baseUrl: string;
-  private apiKey: string;
 
-  constructor(baseUrl: string, apiKey: string) {
+  constructor(baseUrl: string) {
     this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
+  }
+
+  private async getAuthToken(): Promise<string> {
+    const token = await _getToken();
+    return token || STATIC_API_KEY;
   }
 
   private async request<T>(path: string, options: RequestInit = {}): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const authToken = await this.getAuthToken();
 
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.apiKey}`,
+      Authorization: `Bearer ${authToken}`,
     };
     if (options.body) {
       headers['Content-Type'] = 'application/json';
@@ -65,11 +77,12 @@ class ApiClient {
 
   async postFormData<T>(path: string, formData: FormData): Promise<T> {
     const url = `${this.baseUrl}${path}`;
+    const authToken = await this.getAuthToken();
     let res: Response;
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${this.apiKey}` },
+        headers: { Authorization: `Bearer ${authToken}` },
         body: formData,
       });
     } catch {
@@ -99,4 +112,4 @@ export class ApiError extends Error {
   }
 }
 
-export const apiClient = new ApiClient(BASE_URL, API_KEY);
+export const apiClient = new ApiClient(BASE_URL);

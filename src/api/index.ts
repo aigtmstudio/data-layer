@@ -25,17 +25,25 @@ import { discoveryRoutes } from './routes/discovery.js';
 import { marketBuilderRoutes } from './routes/market-builder.js';
 import { webinarSpeakerRoutes } from './routes/webinar-speakers.js';
 import { discoveryTestRoutes } from './routes/discovery-test.js';
+import { demoRoutes } from './routes/demo.js';
 import type { ServiceContainer } from '../index.js';
 
-export async function buildApp(apiKey: string, container: ServiceContainer) {
+interface BuildAppOpts {
+  apiKey: string;
+  clerkSecretKey?: string;
+  corsOrigin?: string;
+}
+
+export async function buildApp(opts: BuildAppOpts, container: ServiceContainer) {
   const app = Fastify({
     logger: true,
   });
 
   // Plugins
-  await app.register(cors, { origin: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
+  const corsOrigin = opts.corsOrigin ? opts.corsOrigin.split(',') : true;
+  await app.register(cors, { origin: corsOrigin, credentials: true, methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] });
   await app.register(multipart, { limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB max
-  await app.register(authPlugin, { apiKey });
+  await app.register(authPlugin, { apiKey: opts.apiKey, clerkSecretKey: opts.clerkSecretKey });
   await app.register(errorHandlerPlugin);
 
   // Routes
@@ -65,6 +73,9 @@ export async function buildApp(apiKey: string, container: ServiceContainer) {
     container,
     providers: container._providers ?? {},
   });
+
+  // Demo routes (public-facing, with own auth + rate limiting)
+  await app.register(demoRoutes, { prefix: '/api/demo', container });
 
   // Health check
   app.get('/health', async () => ({

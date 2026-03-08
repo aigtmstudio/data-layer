@@ -48,6 +48,7 @@ import { UptimeRobotProvider } from './providers/uptimerobot/index.js';
 import { PromptConfigService } from './services/prompt-config/index.js';
 import { createTrackedAnthropicClient } from './lib/llm-tracker.js';
 import { logger } from './lib/logger.js';
+import { DemoService } from './services/demo/index.js';
 
 export interface ServiceContainer {
   creditManager: CreditManager;
@@ -87,6 +88,8 @@ export interface ServiceContainer {
   marketBuilder: MarketBuilderService;
   // Webinar speaker finder
   webinarSpeakerFinder: WebinarSpeakerFinder;
+  // Demo service (optional — requires DEMO_CLIENT_ID)
+  demoService?: DemoService;
   // Raw providers (exposed for discovery-test routes)
   _providers?: {
     apify?: ApifyProvider;
@@ -257,6 +260,26 @@ async function main() {
   if (apifyProvider) webinarSpeakerFinder.setApifyProvider(apifyProvider);
   logger.info({ exa: !!exaProvider, apify: !!apifyProvider }, 'Webinar speaker finder initialized');
 
+  // Demo service (optional — requires DEMO_CLIENT_ID env var)
+  let demoService: DemoService | undefined;
+  if (config.demoClientId) {
+    const demoLlm = createTrackedAnthropicClient({ apiKey: config.anthropicApiKey, service: 'demo' });
+    demoService = new DemoService(
+      config.demoClientId,
+      config.demoDailyLimit,
+      demoLlm,
+      {
+        icpParser,
+        marketBuzzGenerator,
+        marketSignalProcessor,
+        marketSignalSearcher,
+        orchestrator,
+        intelligenceScorer,
+      },
+    );
+    logger.info({ clientId: config.demoClientId, dailyLimit: config.demoDailyLimit }, 'Demo service initialized');
+  }
+
   // 4. Store in container
   container = {
     creditManager,
@@ -286,6 +309,7 @@ async function main() {
     competitorMonitor,
     marketBuilder,
     webinarSpeakerFinder,
+    demoService,
     _providers: { apify: apifyProvider, exa: exaProvider, tavily: tavilyProvider, anthropicApiKey: config.anthropicApiKey },
   };
 
@@ -310,8 +334,20 @@ async function main() {
     },
   });
 
+  // 5b. Register demo cron jobs (if demo service is configured)
+  if (demoService && config.demoClientId) {
+    await scheduler.registerDemoJobs({
+      onSignalRefresh: () => demoService!.refreshDemoSignals(),
+      onBuzzPregenerate: () => demoService!.pregenerateBuzzReports(),
+    }, config.demoClientId);
+  }
+
   // 6. Start API server
-  const app = await buildApp(config.apiKey, container);
+  const app = await buildApp({
+    apiKey: config.apiKey,
+    clerkSecretKey: config.clerkSecretKey,
+    corsOrigin: config.corsOrigin,
+  }, container);
   await app.listen({ port: config.apiPort, host: '0.0.0.0' });
   logger.info({ port: config.apiPort }, 'Data Layer API started');
 

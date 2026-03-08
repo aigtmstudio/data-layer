@@ -386,8 +386,24 @@ export class MarketBuilderService {
           this.log.warn({ clientId }, 'Apollo provider skipped — listId and icpId required');
           return { found: 0, added: 0 };
         }
-        const r = await this.listBuilder.buildList({ clientId, listId, icpId, limit: p.limit });
-        return { found: r.companiesAdded, added: r.companiesAdded };
+        // Create a tracking job for the discovery
+        const db = getDb();
+        const [job] = await db.insert(schema.jobs).values({
+          clientId,
+          type: 'list_build',
+          status: 'running',
+          input: { listId, icpId, source: 'market-builder' },
+        }).returning();
+        try {
+          const r = await this.listBuilder.buildListWithDiscovery({
+            clientId, listId, icpId, jobId: job.id, limit: p.limit,
+          });
+          await db.update(schema.jobs).set({ status: 'completed', completedAt: new Date() }).where(eq(schema.jobs.id, job.id));
+          return { found: r.discovery.companiesDiscovered, added: r.companiesAdded };
+        } catch (err) {
+          await db.update(schema.jobs).set({ status: 'failed', completedAt: new Date() }).where(eq(schema.jobs.id, job.id));
+          throw err;
+        }
       }
 
       case 'social_instagram':

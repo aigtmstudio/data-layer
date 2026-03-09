@@ -152,12 +152,12 @@ Topic description: ${angle.description}
 Key talking points: ${angle.talkingPoints.join(', ')}
 Target audience: ${angle.targetSegments.join(', ')}
 
-Generate 6 search queries to find people who:
-- Publicly talk about this topic on social media or in articles
-- Have a relevant professional background
+Generate 6 search queries to find INDIVIDUAL PEOPLE (not companies) who:
+- Publicly talk about this topic on LinkedIn or in articles
+- Have a relevant professional background (founder, consultant, VP, director, practitioner)
 - Have a credible audience or following
 
-Keep each query concise (5-10 words). Focus on content creators, industry experts, founders, consultants, and practitioners in this space.
+Keep each query concise (5-10 words). Focus on individual experts, founders, consultants, and practitioners — NOT company pages or brand accounts. Include terms like "speaker", "founder", "consultant", "director", or "expert" to target people.
 
 Return ONLY valid JSON: { "queries": ["...", "...", "...", "...", "...", "..."] }`;
 
@@ -195,13 +195,13 @@ Return ONLY valid JSON: { "queries": ["...", "...", "...", "...", "...", "..."] 
     const searches: Promise<SpeakerCandidate[]>[] = [];
 
     if (this.exaProvider) {
-      // Tweet searches (first 3 queries)
-      for (const query of queries.slice(0, 3)) {
-        searches.push(this.searchTweets(query));
-      }
-      // LinkedIn domain searches (next 2 queries)
-      for (const query of queries.slice(3, 5)) {
+      // LinkedIn domain searches (first 4 queries — primary source)
+      for (const query of queries.slice(0, 4)) {
         searches.push(this.searchLinkedIn(query));
+      }
+      // Tweet search (1 query — supplementary only)
+      if (queries[4]) {
+        searches.push(this.searchTweets(queries[4]));
       }
     }
 
@@ -382,6 +382,11 @@ ${candidateList}
 For each candidate, assess:
 - RELEVANCE: How directly they address this exact topic (0.0–1.0)
 - REACH: Their credibility signals — audience size, seniority, publication history (0.0–1.0)
+
+IMPORTANT RULES:
+- Only include INDIVIDUAL PEOPLE — never company accounts, brand pages, or organisations.
+- Strongly prefer candidates found on LinkedIn. Twitter-only candidates should only be included if exceptionally relevant.
+- If a candidate name looks like a company (e.g. "Acme Corp", "Marketing Agency") rather than a person, EXCLUDE them.
 
 Select and rank the best 10–15 speakers. Only include people who clearly have expertise or a public voice on this topic. Exclude vague or generic entries.
 

@@ -27,6 +27,7 @@ import {
   DollarSign,
   FlaskConical,
   Menu,
+  BookOpen,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -49,6 +50,7 @@ const navItems: NavItem[] = [
   { href: '/costs', label: 'Costs', icon: DollarSign },
   { href: '/discovery-test', label: 'Discovery Test', icon: FlaskConical },
   { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/settings/getting-started', label: 'Getting Started', icon: BookOpen },
 ];
 
 function NavLink({
@@ -90,8 +92,8 @@ function SidebarContent({ onLinkClick }: { onLinkClick?: () => void }) {
       <nav className="flex-1 overflow-y-auto space-y-1 p-3">
         {navItems.map((item) => {
           const isActive =
-            item.href === '/'
-              ? pathname === '/'
+            item.href === '/' || item.href === '/settings'
+              ? pathname === item.href
               : pathname.startsWith(item.href);
           return (
             <NavLink

@@ -884,6 +884,14 @@ export default function ListDetailPage({ params }: { params: Promise<{ id: strin
   const [refreshDays, setRefreshDays] = useState('7');
   const [buildingJobId, setBuildingJobId] = useState<string | null>(null);
   const { data: buildJob } = useBuildStatus(buildingJobId ? id : null);
+  // Always check for a running job on mount (persists progress across navigation)
+  const { data: latestJob } = useBuildStatus(id);
+  useEffect(() => {
+    if (!buildingJobId && latestJob && (latestJob.status === 'running' || latestJob.status === 'pending')) {
+      setBuildingJobId(latestJob.id);
+      if (latestJob.type === 'market_signal_search') setApplyingSignals(true);
+    }
+  }, [latestJob, buildingJobId]);
 
   // Auto-poll build status for contact lists that have no members yet (build still running)
   const [contactBuildDone, setContactBuildDone] = useState(false);

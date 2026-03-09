@@ -393,38 +393,78 @@ For each selected speaker write:
 - evidence: 2 specific posts/signals that show their engagement with the topic
 - outreach_message: A personalised ~80-word invite referencing their actual content
 
-Return ONLY valid JSON array (no extra text):
-[{
-  "rank": 1,
-  "name": "...",
-  "currentTitle": "...",
-  "company": "...",
-  "bio": "...",
-  "relevanceScore": 0.9,
-  "reachScore": 0.7,
-  "primaryPlatform": "linkedin",
-  "primaryProfileUrl": "https://...",
-  "socialProfiles": [{"platform": "linkedin", "handle": "...", "url": "https://..."}],
-  "speaker_reasoning": "...",
-  "evidence": [{"text": "...", "url": "https://..."}],
-  "outreach_message": "..."
-}]`;
+Use the submit_speaker_rankings tool to return your results.`;
+
+    const speakerTool = {
+      name: 'submit_speaker_rankings' as const,
+      description: 'Submit the ranked list of speakers',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          speakers: {
+            type: 'array' as const,
+            items: {
+              type: 'object' as const,
+              properties: {
+                rank: { type: 'number' as const },
+                name: { type: 'string' as const },
+                currentTitle: { type: 'string' as const },
+                company: { type: 'string' as const },
+                bio: { type: 'string' as const },
+                relevanceScore: { type: 'number' as const },
+                reachScore: { type: 'number' as const },
+                primaryPlatform: { type: 'string' as const },
+                primaryProfileUrl: { type: 'string' as const },
+                socialProfiles: {
+                  type: 'array' as const,
+                  items: {
+                    type: 'object' as const,
+                    properties: {
+                      platform: { type: 'string' as const },
+                      handle: { type: 'string' as const },
+                      url: { type: 'string' as const },
+                    },
+                    required: ['platform', 'handle', 'url'],
+                  },
+                },
+                speaker_reasoning: { type: 'string' as const },
+                evidence: {
+                  type: 'array' as const,
+                  items: {
+                    type: 'object' as const,
+                    properties: {
+                      text: { type: 'string' as const },
+                      url: { type: 'string' as const },
+                    },
+                    required: ['text', 'url'],
+                  },
+                },
+                outreach_message: { type: 'string' as const },
+              },
+              required: ['rank', 'name', 'bio', 'relevanceScore', 'reachScore', 'speaker_reasoning', 'outreach_message'],
+            },
+          },
+        },
+        required: ['speakers'],
+      },
+    };
 
     try {
       const message = await this.anthropic.messages.create({
         model: 'claude-sonnet-4-6',
-        max_tokens: 4096,
+        max_tokens: 8192,
         messages: [{ role: 'user', content: prompt }],
+        tools: [speakerTool],
+        tool_choice: { type: 'tool', name: 'submit_speaker_rankings' },
       });
 
-      const text = message.content[0].type === 'text' ? message.content[0].text : '';
-      const jsonMatch = text.match(/\[[\s\S]*\]/);
-      if (!jsonMatch) {
-        log.warn({ angleTitle: angle.title }, 'No JSON array in speaker scoring response');
+      const toolBlock = message.content.find((b) => b.type === 'tool_use');
+      if (!toolBlock || toolBlock.type !== 'tool_use') {
+        log.warn({ angleTitle: angle.title }, 'No tool use block in speaker scoring response');
         return [];
       }
 
-      const parsed = JSON.parse(jsonMatch[0]) as Array<{
+      const input = toolBlock.input as { speakers: Array<{
         rank: number;
         name: string;
         currentTitle?: string;
@@ -438,7 +478,9 @@ Return ONLY valid JSON array (no extra text):
         speaker_reasoning: string;
         evidence?: Array<{ text: string; url: string }>;
         outreach_message: string;
-      }>;
+      }> };
+
+      const parsed = input.speakers;
 
       return parsed.map((s) => ({
         rank: s.rank,

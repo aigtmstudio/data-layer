@@ -333,15 +333,19 @@ export class MarketSignalProcessor {
             const credibilityMult = computeSourceCredibilityMultiplier(signal.sourceUrl, signal.sourceName);
             const adjustedRelevance = classification.relevanceScore * timeMult * credibilityMult;
 
-            log.debug({
+            const passesThreshold = adjustedRelevance >= 0.75 && classification.affectedSegments?.length > 0;
+            log.info({
               signalId: signal.id,
+              headline: signal.headline?.slice(0, 80),
               rawRelevance: classification.relevanceScore,
               timeliness: { multiplier: timeMult, band: timeBand },
-              credibility: { multiplier: credibilityMult, sourceUrl: signal.sourceUrl, sourceName: signal.sourceName },
+              credibility: { multiplier: credibilityMult, sourceName: signal.sourceName },
               adjustedRelevance,
-            }, 'Timeliness+credibility-adjusted relevance');
+              affectedSegments: classification.affectedSegments,
+              passesThreshold,
+            }, passesThreshold ? 'Signal PASSES promotion threshold' : 'Signal below promotion threshold');
 
-            if (adjustedRelevance >= 0.75 && classification.affectedSegments?.length > 0) {
+            if (passesThreshold) {
               await this.promoteCompanies(
                 cId, classification.affectedSegments, signal.id,
                 matchedHypothesis?.id, classification.relevanceScore,
@@ -424,11 +428,17 @@ export class MarketSignalProcessor {
       .filter(c => { if (seen.has(c.id)) return false; seen.add(c.id); return true; });
 
     if (tamCompanies.length === 0) {
-      log.debug('No TAM/active companies with strong ICP fit to evaluate');
+      log.info('No TAM/active companies with strong ICP fit (>= 0.65) to evaluate — check ICP fit scores');
       return;
     }
 
-    log.info({ tamCount: tamCompanies.length }, 'Evaluating TAM/active companies (ICP >= 65%) against market signal');
+    const withProfile = tamCompanies.filter(c => !!c.websiteProfile).length;
+    const withoutProfile = tamCompanies.length - withProfile;
+    log.info({
+      tamCount: tamCompanies.length,
+      withPestleProfile: withProfile,
+      withoutPestleProfile: withoutProfile,
+    }, 'Evaluating TAM/active companies (ICP >= 65%) against market signal');
 
     // Get promotion prompt
     let promotionPrompt = PROMOTION_PROMPT;
@@ -493,7 +503,22 @@ export class MarketSignalProcessor {
           reasoning: string;
         }>;
 
-        if (!Array.isArray(evaluations)) continue;
+        if (!Array.isArray(evaluations)) {
+          log.info({ batchStart: i, rawResponse: cleaned.slice(0, 500) }, 'LLM returned non-array response');
+          continue;
+        }
+
+        log.info({
+          batchStart: i,
+          batchSize: batch.length,
+          evaluationsReturned: evaluations.length,
+          evaluations: evaluations.map(e => ({
+            company: e.companyIndex >= 0 && e.companyIndex < batch.length ? batch[e.companyIndex].name : `?${e.companyIndex}`,
+            affected: e.affected,
+            confidence: e.confidence,
+            dimension: e.pestleDimension,
+          })),
+        }, 'LLM promotion evaluation result');
 
         for (const evaluation of evaluations) {
           if (!evaluation.affected || evaluation.confidence < 0.8) continue;
